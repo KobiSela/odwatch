@@ -43,17 +43,41 @@ class InstagramStoryBot:
             if self.ig_sessionid:
                 try:
                     print("🔑 Using sessionid for login...")
-                    self.instagram_client.set_settings({
-                        "sessionid": self.ig_sessionid
-                    })
+                    
+                    # Decode the URL-encoded sessionid
+                    import urllib.parse
+                    decoded_sessionid = urllib.parse.unquote(self.ig_sessionid)
+                    print(f"🔓 Decoded sessionid: {decoded_sessionid[:20]}...")
+                    
+                    # Set the sessionid in the client settings
+                    settings = {
+                        "sessionid": decoded_sessionid,
+                        "mid": "",
+                        "ig_u_ds": "",
+                        "ig_www_claim": "",
+                        "csrftoken": "",
+                    }
+                    
+                    self.instagram_client.set_settings(settings)
                     
                     # Test the session by getting user info
-                    user_info = self.instagram_client.account_info()
-                    print(f"✅ Session login successful! Logged in as: {user_info.username}")
-                    return True
+                    try:
+                        user_info = self.instagram_client.account_info()
+                        print(f"✅ Session login successful! Logged in as: {user_info.username}")
+                        return True
+                    except Exception as test_error:
+                        print(f"🔄 Session test failed, trying login_by_sessionid: {test_error}")
+                        
+                        # Try alternative method
+                        self.instagram_client = Client()
+                        self.instagram_client.login_by_sessionid(decoded_sessionid)
+                        user_info = self.instagram_client.account_info()
+                        print(f"✅ Alternative session login successful! Logged in as: {user_info.username}")
+                        return True
                     
                 except Exception as e:
                     print(f"❌ Sessionid login failed: {e}")
+                    print("🔄 Trying to create new session...")
                     # Fall through to username/password method
             
             # Method 2: Try to load existing session file
@@ -61,17 +85,46 @@ class InstagramStoryBot:
                 try:
                     print("📂 Loading existing Instagram session...")
                     self.instagram_client.load_settings(self.session_file)
-                    self.instagram_client.login(self.ig_username, self.ig_password)
-                    print("✅ Instagram session loaded successfully!")
-                    return True
+                    
+                    # Try to relogin to refresh session
+                    if self.ig_username and self.ig_password:
+                        self.instagram_client.login(self.ig_username, self.ig_password)
+                        print("✅ Instagram session loaded and refreshed successfully!")
+                        return True
+                    else:
+                        # Try to use existing session without relogin
+                        user_info = self.instagram_client.account_info()
+                        print("✅ Instagram session loaded successfully!")
+                        return True
+                        
                 except Exception as e:
                     print(f"⚠️ Failed to load session: {e}")
-                    os.remove(self.session_file)
+                    try:
+                        os.remove(self.session_file)
+                    except:
+                        pass
             
             # Method 3: Login with credentials if available
             if self.ig_username and self.ig_password:
                 try:
                     print("🔐 Logging into Instagram with username/password...")
+                    
+                    # Create a fresh client
+                    self.instagram_client = Client()
+                    
+                    # Set some device info to look more legitimate
+                    self.instagram_client.set_device({
+                        "app_version": "269.0.0.18.75",
+                        "android_version": 26,
+                        "android_release": "8.0.0",
+                        "dpi": "480dpi",
+                        "resolution": "1080x1920",
+                        "manufacturer": "OnePlus",
+                        "device": "OnePlus6T",
+                        "model": "ONEPLUS A6013",
+                        "cpu": "qcom"
+                    })
+                    
                     self.instagram_client.login(self.ig_username, self.ig_password)
                     
                     # Save session for future use
@@ -82,8 +135,8 @@ class InstagramStoryBot:
                 except BadPassword:
                     print("❌ Instagram: Invalid username or password")
                     return False
-                except ChallengeRequired:
-                    print("❌ Instagram: Challenge required (2FA or verification)")
+                except ChallengeRequired as e:
+                    print(f"❌ Instagram: Challenge required (2FA or verification): {e}")
                     return False
                 except Exception as e:
                     print(f"❌ Instagram login error: {e}")
