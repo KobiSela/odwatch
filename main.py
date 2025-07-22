@@ -419,64 +419,64 @@ class InstagramStoryBot:
             return []
     
     def process_new_stories(self):
-        """Check for new stories and send them"""
+        """Check for new stories and send them - ONLY REAL STORIES"""
         
-        # Only try to get real stories if Instagram client is working
-        if self.instagram_client and self.is_client_working:
-            stories = self.get_user_stories()
+        # Check if Instagram client is working
+        if not self.instagram_client:
+            print("⚠️ Instagram client not initialized - stopping")
+            self.is_client_working = False
+            return
+        
+        if not self.is_client_working:
+            print("⚠️ Instagram client disabled due to previous errors - stopping")
+            return
+        
+        # Try to get real stories
+        stories = self.get_user_stories()
+        
+        if stories:
+            print(f"📱 Processing {len(stories)} new REAL stories")
             
-            if stories:
-                print(f"📱 Processing {len(stories)} new real stories")
-                
-                for story in stories:
-                    try:
-                        # Prepare caption for real stories
-                        caption = (
-                            f"📸 🎯 REAL Story מ-@{self.instagram_username}\n"
-                            f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
-                            f"✅ הבוט עובד עם Instagram Private API!\n"
-                            f"🔥 זהו סטורי אמיתי מהאינסטגרם!"
-                        )
+            for story in stories:
+                try:
+                    # Prepare caption for real stories
+                    caption = (
+                        f"📸 🎯 REAL Story מ-@{self.instagram_username}\n"
+                        f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
+                        f"✅ הבוט עובד עם Instagram Private API!\n"
+                        f"🔥 זהו סטורי אמיתי מהאינסטגרם!"
+                    )
+                    
+                    # Send to Telegram based on type
+                    success = False
+                    if story['type'] == 'video':
+                        success = self.send_telegram_video(story['url'], caption)
+                    elif story['type'] == 'photo':
+                        success = self.send_telegram_photo(story['url'], caption)
+                    
+                    if success:
+                        print(f"✅ Sent REAL story: {story['id']}")
                         
-                        # Send to Telegram based on type
-                        success = False
-                        if story['type'] == 'video':
-                            success = self.send_telegram_video(story['url'], caption)
-                        elif story['type'] == 'photo':
-                            success = self.send_telegram_photo(story['url'], caption)
+                        # Mark as sent
+                        self.sent_stories.append(story['id'])
+                        self.save_sent_stories()
                         
-                        if success:
-                            print(f"✅ Sent real story: {story['id']}")
-                            
-                            # Mark as sent
-                            self.sent_stories.append(story['id'])
+                        # Clean up old entries
+                        if len(self.sent_stories) > 100:
+                            self.sent_stories = self.sent_stories[-100:]
                             self.save_sent_stories()
-                            
-                            # Clean up old entries
-                            if len(self.sent_stories) > 100:
-                                self.sent_stories = self.sent_stories[-100:]
-                                self.save_sent_stories()
-                        else:
-                            print(f"❌ Failed to send story: {story['id']}")
-                        
-                        # Wait between sends to avoid spam
-                        time.sleep(5)
-                        
-                    except Exception as e:
-                        print(f"❌ Error processing story: {e}")
-                
-                return  # Exit after processing real stories
-            else:
-                print("ℹ️ No new real stories found")
-                return  # Don't fall back to demo mode
-        
-        # Only use demo mode if Instagram client is disabled/not working
-        elif not self.is_client_working:
-            print("⚠️ Instagram client disabled due to errors - Bot will stop checking")
-            return
+                    else:
+                        print(f"❌ Failed to send story: {story['id']}")
+                    
+                    # Wait between sends to avoid spam
+                    time.sleep(5)
+                    
+                except Exception as e:
+                    print(f"❌ Error processing story: {e}")
         else:
-            print("⚠️ Instagram client not available")
-            return
+            print("ℹ️ No new REAL stories found - continuing to monitor")
+        
+        # NEVER go to demo mode - only real stories or nothing
     
     def start_monitoring(self):
         """Start monitoring Instagram stories"""
@@ -516,7 +516,7 @@ class InstagramStoryBot:
                 f"🤖 Instagram Story Bot V6 הופעל!\n"
                 f"👤 עוקב אחר: @{self.instagram_username}\n\n"
                 f"⚠️ Instagram API לא זמין\n"
-                f"🎭 Demo Mode פעיל\n"
+                f"🛑 Bot will stop - לא ישלח Demo Stories\n"
                 f"💡 הוסף IG_SESSIONID או IG_USERNAME/IG_PASSWORD"
             )
         
@@ -548,6 +548,10 @@ class InstagramStoryBot:
                 break
             except Exception as e:
                 print(f"❌ Unexpected error: {e}")
+                # Check if Instagram is still working before retrying
+                if not self.is_client_working:
+                    print("🛑 Instagram client disabled, stopping retries")
+                    break
                 print("⏳ Retrying in 5 minutes...")
                 time.sleep(300)  # Shorter retry interval
 
