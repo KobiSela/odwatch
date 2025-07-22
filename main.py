@@ -350,40 +350,52 @@ class InstagramStoryBot:
                 print(f"📸 Found {len(user_stories)} stories")
                 
                 for story in user_stories:
-                    story_id = f"real_{story.pk}"
-                    
-                    # Skip if already sent
-                    if story_id in self.sent_stories:
+                    try:
+                        story_id = f"real_{story.pk}"
+                        
+                        # Skip if already sent
+                        if story_id in self.sent_stories:
+                            continue
+                        
+                        # Debug: Print story attributes
+                        print(f"🔍 Processing story {story.pk}, attributes: {dir(story)}")
+                        
+                        # Get media URL - Safe approach
+                        media_url = None
+                        media_type = None
+                        
+                        # Try different ways to get the media URL
+                        if hasattr(story, 'video_url') and getattr(story, 'video_url', None):
+                            media_url = getattr(story, 'video_url')
+                            media_type = 'video'
+                            print(f"✅ Found video URL for story {story.pk}")
+                        elif hasattr(story, 'thumbnail_url') and getattr(story, 'thumbnail_url', None):
+                            media_url = getattr(story, 'thumbnail_url')
+                            media_type = 'photo'
+                            print(f"✅ Found thumbnail URL for story {story.pk}")
+                        elif hasattr(story, 'url') and getattr(story, 'url', None):
+                            media_url = getattr(story, 'url')
+                            media_type = 'photo'
+                            print(f"✅ Found regular URL for story {story.pk}")
+                        
+                        if not media_url:
+                            print(f"⚠️ No media URL found for story {story.pk}, skipping")
+                            continue
+                        
+                        story_data = {
+                            'id': story_id,
+                            'url': media_url,
+                            'type': media_type,
+                            'timestamp': getattr(story, 'taken_at', datetime.now()),
+                            'story_pk': story.pk
+                        }
+                        
+                        stories.append(story_data)
+                        print(f"✅ Successfully processed story: {story.pk} ({media_type})")
+                        
+                    except Exception as story_error:
+                        print(f"❌ Error processing individual story {story.pk}: {story_error}")
                         continue
-                    
-                    # Get media URL - Fix the variable names
-                    media_url = None
-                    media_type = None
-                    
-                    if hasattr(story, 'video_url') and story.video_url:
-                        media_url = story.video_url
-                        media_type = 'video'
-                    elif hasattr(story, 'thumbnail_url') and story.thumbnail_url:
-                        media_url = story.thumbnail_url
-                        media_type = 'photo'
-                    elif hasattr(story, 'url') and story.url:
-                        media_url = story.url
-                        media_type = 'photo'
-                    
-                    if not media_url:
-                        print(f"⚠️ No media URL found for story {story.pk}")
-                        continue
-                    
-                    story_data = {
-                        'id': story_id,
-                        'url': media_url,
-                        'type': media_type,
-                        'timestamp': story.taken_at,
-                        'story_pk': story.pk
-                    }
-                    
-                    stories.append(story_data)
-                    print(f"✅ Processed story: {story.pk} ({media_type})")
                 
                 return stories
                 
