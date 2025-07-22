@@ -8,16 +8,17 @@ from instagrapi.exceptions import LoginRequired, ChallengeRequired, BadPassword
 import random
 
 class InstagramStoryBot:
-    def __init__(self, bot_token, chat_id, instagram_username, ig_username=None, ig_password=None):
+    def __init__(self, bot_token, chat_id, instagram_username, ig_sessionid=None, ig_username=None, ig_password=None):
         """
-        Initialize the Instagram Story Bot with real Instagram Private API
+        Initialize the Instagram Story Bot with sessionid or credentials
         """
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.instagram_username = instagram_username.replace('@', '')
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         
-        # Instagram credentials (optional for public accounts)
+        # Instagram credentials and session
+        self.ig_sessionid = ig_sessionid
         self.ig_username = ig_username
         self.ig_password = ig_password
         
@@ -33,12 +34,29 @@ class InstagramStoryBot:
         self.init_instagram_client()
         
     def init_instagram_client(self):
-        """Initialize Instagram client with authentication"""
+        """Initialize Instagram client with sessionid or authentication"""
         try:
             print("🔧 Initializing Instagram client...")
             self.instagram_client = Client()
             
-            # Try to load existing session
+            # Method 1: Use sessionid if available
+            if self.ig_sessionid:
+                try:
+                    print("🔑 Using sessionid for login...")
+                    self.instagram_client.set_settings({
+                        "sessionid": self.ig_sessionid
+                    })
+                    
+                    # Test the session by getting user info
+                    user_info = self.instagram_client.account_info()
+                    print(f"✅ Session login successful! Logged in as: {user_info.username}")
+                    return True
+                    
+                except Exception as e:
+                    print(f"❌ Sessionid login failed: {e}")
+                    # Fall through to username/password method
+            
+            # Method 2: Try to load existing session file
             if os.path.exists(self.session_file):
                 try:
                     print("📂 Loading existing Instagram session...")
@@ -50,10 +68,10 @@ class InstagramStoryBot:
                     print(f"⚠️ Failed to load session: {e}")
                     os.remove(self.session_file)
             
-            # Login with credentials if available
+            # Method 3: Login with credentials if available
             if self.ig_username and self.ig_password:
                 try:
-                    print("🔐 Logging into Instagram...")
+                    print("🔐 Logging into Instagram with username/password...")
                     self.instagram_client.login(self.ig_username, self.ig_password)
                     
                     # Save session for future use
@@ -71,7 +89,7 @@ class InstagramStoryBot:
                     print(f"❌ Instagram login error: {e}")
                     return False
             else:
-                print("⚠️ No Instagram credentials provided - using anonymous mode")
+                print("⚠️ No Instagram credentials or sessionid provided - using demo mode")
                 return False
                 
         except Exception as e:
@@ -280,7 +298,7 @@ class InstagramStoryBot:
                         f"📸 Demo Story מ-@{self.instagram_username}\n"
                         f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
                         f"🤖 Demo Mode - Instagram API לא זמין כרגע\n"
-                        f"💡 יש צורך בשיפור התחברות לאינסטגרם"
+                        f"💡 יש צורך ב-sessionid או credentials נכונים"
                     )
                 
                 # Send to Telegram based on type
@@ -317,22 +335,39 @@ class InstagramStoryBot:
         print(f"📱 Sending to Telegram chat: {self.chat_id}")
         print(f"⏱️ Checking every 5 minutes...")
         
-        # Send startup message
-        if self.instagram_client and self.ig_username:
-            startup_msg = (
-                f"🤖 Instagram Story Bot V5 הופעל!\n"
-                f"👤 עוקב אחר: @{self.instagram_username}\n\n"
-                f"🔥 מחובר לInstagram Private API!\n"
-                f"✅ חשבון Instagram: @{self.ig_username}\n"
-                f"📱 יקבל סטוריז אמיתיים כל 5 דקות!"
-            )
+        # Send startup message based on authentication method
+        if self.instagram_client:
+            if self.ig_sessionid:
+                startup_msg = (
+                    f"🤖 Instagram Story Bot V6 הופעל!\n"
+                    f"👤 עוקב אחר: @{self.instagram_username}\n\n"
+                    f"🔑 מחובר עם Session ID!\n"
+                    f"✅ Instagram API פעיל\n"
+                    f"📱 יקבל סטוריז אמיתיים כל 5 דקות!"
+                )
+            elif self.ig_username:
+                startup_msg = (
+                    f"🤖 Instagram Story Bot V6 הופעל!\n"
+                    f"👤 עוקב אחר: @{self.instagram_username}\n\n"
+                    f"🔥 מחובר לInstagram Private API!\n"
+                    f"✅ חשבון Instagram: @{self.ig_username}\n"
+                    f"📱 יקבל סטוריז אמיתיים כל 5 דקות!"
+                )
+            else:
+                startup_msg = (
+                    f"🤖 Instagram Story Bot V6 הופעל!\n"
+                    f"👤 עוקב אחר: @{self.instagram_username}\n\n"
+                    f"⚠️ Instagram API לא זמין\n"
+                    f"🎭 Demo Mode פעיל\n"
+                    f"💡 הוסף IG_SESSIONID או IG_USERNAME/IG_PASSWORD"
+                )
         else:
             startup_msg = (
-                f"🤖 Instagram Story Bot V5 הופעל!\n"
+                f"🤖 Instagram Story Bot V6 הופעל!\n"
                 f"👤 עוקב אחר: @{self.instagram_username}\n\n"
                 f"⚠️ Instagram API לא זמין\n"
                 f"🎭 Demo Mode פעיל\n"
-                f"💡 הוסף IG_USERNAME ו-IG_PASSWORD למשתני סביבה"
+                f"💡 הוסף IG_SESSIONID או IG_USERNAME/IG_PASSWORD"
             )
         
         self.send_telegram_message(startup_msg)
@@ -361,19 +396,25 @@ def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     CHAT_ID = os.getenv('CHAT_ID') 
     INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME')
-    IG_USERNAME = os.getenv('IG_USERNAME')  # Instagram login username (optional)
-    IG_PASSWORD = os.getenv('IG_PASSWORD')  # Instagram login password (optional)
+    IG_SESSIONID = os.getenv('IG_SESSIONID')        # New: sessionid method
+    IG_USERNAME = os.getenv('IG_USERNAME')          # Optional: username method
+    IG_PASSWORD = os.getenv('IG_PASSWORD')          # Optional: password method
     
     # Validate required configuration
     if not BOT_TOKEN or not CHAT_ID or not INSTAGRAM_USERNAME:
         print("❌ Missing required environment variables!")
         print("Required: BOT_TOKEN, CHAT_ID, INSTAGRAM_USERNAME")
-        print("Optional: IG_USERNAME, IG_PASSWORD (for real stories)")
+        print("Authentication options:")
+        print("  1. IG_SESSIONID (recommended)")
+        print("  2. IG_USERNAME + IG_PASSWORD")
         return
     
     print(f"🚀 Starting bot...")
     print(f"👤 Target: @{INSTAGRAM_USERNAME}")
-    if IG_USERNAME:
+    
+    if IG_SESSIONID:
+        print(f"🔑 Using Session ID authentication")
+    elif IG_USERNAME:
         print(f"🔐 Instagram Account: @{IG_USERNAME}")
     else:
         print("⚠️ No Instagram credentials - Demo Mode only")
@@ -383,6 +424,7 @@ def main():
         BOT_TOKEN, 
         CHAT_ID, 
         INSTAGRAM_USERNAME,
+        IG_SESSIONID,
         IG_USERNAME,
         IG_PASSWORD
     )
