@@ -2,42 +2,38 @@ import requests
 import time
 import json
 import os
+import re
 from datetime import datetime
-import instaloader
-from pathlib import Path
+from bs4 import BeautifulSoup
+import random
 
 class InstagramStoryBot:
     def __init__(self, bot_token, chat_id, instagram_username):
         """
         Initialize the Instagram Story Bot
-        
-        Args:
-            bot_token (str): Telegram bot token
-            chat_id (str): Telegram chat ID
-            instagram_username (str): Instagram username to monitor
         """
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.instagram_username = instagram_username
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         
-        # Initialize Instaloader
-        self.loader = instaloader.Instaloader(
-            download_videos=True,
-            download_video_thumbnails=False,
-            download_geotags=False,
-            download_comments=False,
-            save_metadata=False,
-            compress_json=False
-        )
-        
         # File to track sent stories
         self.sent_stories_file = "sent_stories.json"
         self.sent_stories = self.load_sent_stories()
         
-        # Directory for downloaded files
-        self.download_dir = "downloads"
-        os.makedirs(self.download_dir, exist_ok=True)
+        # Headers to mimic real browser
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        # Session for maintaining cookies
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
     
     def load_sent_stories(self):
         """Load the list of already sent stories"""
@@ -73,121 +69,140 @@ class InstagramStoryBot:
             print(f"❌ Error sending message: {e}")
             return False
     
-    def send_telegram_photo(self, photo_path, caption=""):
-        """Send photo to Telegram"""
+    def send_telegram_photo(self, photo_url, caption=""):
+        """Send photo URL to Telegram"""
         url = f"{self.base_url}/sendPhoto"
+        payload = {
+            'chat_id': self.chat_id,
+            'photo': photo_url,
+            'caption': caption,
+            'parse_mode': 'HTML'
+        }
         
         try:
-            with open(photo_path, 'rb') as photo:
-                files = {'photo': photo}
-                data = {
-                    'chat_id': self.chat_id,
-                    'caption': caption,
-                    'parse_mode': 'HTML'
-                }
-                response = requests.post(url, files=files, data=data)
-                return response.status_code == 200
+            response = requests.post(url, data=payload)
+            if response.status_code == 200:
+                return True
+            else:
+                print(f"❌ Telegram error: {response.text}")
+                return False
         except Exception as e:
             print(f"❌ Error sending photo: {e}")
             return False
     
-    def send_telegram_video(self, video_path, caption=""):
-        """Send video to Telegram"""
+    def send_telegram_video(self, video_url, caption=""):
+        """Send video URL to Telegram"""
         url = f"{self.base_url}/sendVideo"
+        payload = {
+            'chat_id': self.chat_id,
+            'video': video_url,
+            'caption': caption,
+            'parse_mode': 'HTML'
+        }
         
         try:
-            with open(video_path, 'rb') as video:
-                files = {'video': video}
-                data = {
-                    'chat_id': self.chat_id,
-                    'caption': caption,
-                    'parse_mode': 'HTML'
-                }
-                response = requests.post(url, files=files, data=data)
-                return response.status_code == 200
+            response = requests.post(url, data=payload)
+            if response.status_code == 200:
+                return True
+            else:
+                print(f"❌ Telegram error: {response.text}")
+                return False
         except Exception as e:
             print(f"❌ Error sending video: {e}")
             return False
     
-    def get_instagram_stories(self):
-        """Get stories from Instagram profile"""
+    def get_instagram_stories_web(self):
+        """Get stories using web scraping approach"""
         try:
-            print(f"🔍 Checking stories for @{self.instagram_username}...")
+            print(f"🔍 Checking stories for @{self.instagram_username} using web method...")
             
-            # Get profile
-            profile = instaloader.Profile.from_username(self.loader.context, self.instagram_username)
+            # Try multiple Instagram story viewing services
+            services = [
+                f"https://storiesig.net/{self.instagram_username}",
+                f"https://www.instastories.watch/{self.instagram_username}",
+                f"https://instasaved.net/stories/{self.instagram_username}"
+            ]
             
-            # Check if profile has stories
-            if not profile.has_viewable_story:
-                print(f"ℹ️ No viewable stories for @{self.instagram_username}")
-                return []
-            
-            stories = []
-            story_items = self.loader.get_stories(userids=[profile.userid])
-            
-            for story in story_items:
-                for item in story.get_items():
-                    story_id = f"{item.owner_username}_{item.mediaid}"
+            for service_url in services:
+                try:
+                    print(f"🌐 Trying service: {service_url}")
                     
-                    # Skip if already sent
-                    if story_id in self.sent_stories:
-                        continue
+                    # Add random delay to avoid rate limiting
+                    time.sleep(random.uniform(1, 3))
                     
-                    stories.append({
-                        'id': story_id,
-                        'item': item,
-                        'username': item.owner_username,
-                        'timestamp': item.date_utc
-                    })
+                    response = self.session.get(service_url, timeout=15)
+                    
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.content, 'html.parser')
+                        
+                        # Look for story media URLs
+                        stories = []
+                        
+                        # Find images
+                        img_tags = soup.find_all('img', src=True)
+                        for img in img_tags:
+                            src = img['src']
+                            if 'instagram' in src or 'story' in src.lower():
+                                story_id = f"{self.instagram_username}_{hash(src)}"
+                                if story_id not in self.sent_stories:
+                                    stories.append({
+                                        'id': story_id,
+                                        'url': src,
+                                        'type': 'photo',
+                                        'timestamp': datetime.now()
+                                    })
+                        
+                        # Find videos
+                        video_tags = soup.find_all('video')
+                        for video in video_tags:
+                            if video.get('src'):
+                                src = video['src']
+                                story_id = f"{self.instagram_username}_{hash(src)}"
+                                if story_id not in self.sent_stories:
+                                    stories.append({
+                                        'id': story_id,
+                                        'url': src,
+                                        'type': 'video',
+                                        'timestamp': datetime.now()
+                                    })
+                        
+                        if stories:
+                            print(f"✅ Found {len(stories)} stories using web method")
+                            return stories
+                
+                except Exception as e:
+                    print(f"❌ Service {service_url} failed: {e}")
+                    continue
             
-            return stories
+            # If web scraping fails, try alternative API approach
+            return self.get_stories_api_alternative()
             
-        except instaloader.exceptions.ProfileNotExistsException:
-            print(f"❌ Profile @{self.instagram_username} does not exist")
-            return []
-        except instaloader.exceptions.PrivateProfileNotFollowedException:
-            print(f"❌ Profile @{self.instagram_username} is private")
-            return []
         except Exception as e:
-            print(f"❌ Error getting stories: {e}")
+            print(f"❌ Error in web scraping: {e}")
             return []
     
-    def download_story_item(self, story_item):
-        """Download a single story item"""
+    def get_stories_api_alternative(self):
+        """Alternative API approach using public Instagram endpoints"""
         try:
-            # Create filename
-            timestamp = story_item['timestamp'].strftime("%Y%m%d_%H%M%S")
+            print(f"🔄 Trying alternative API approach for @{self.instagram_username}...")
             
-            if story_item['item'].is_video:
-                filename = f"{story_item['username']}_{timestamp}_story.mp4"
-                filepath = os.path.join(self.download_dir, filename)
-                
-                # Download video
-                video_url = story_item['item'].video_url
-                response = requests.get(video_url)
-                with open(filepath, 'wb') as f:
-                    f.write(response.content)
-                
-                return filepath, 'video'
-            else:
-                filename = f"{story_item['username']}_{timestamp}_story.jpg"
-                filepath = os.path.join(self.download_dir, filename)
-                
-                # Download image
-                image_url = story_item['item'].url
-                response = requests.get(image_url)
-                with open(filepath, 'wb') as f:
-                    f.write(response.content)
-                
-                return filepath, 'photo'
-                
+            # This is a simplified approach - in reality, Instagram's API is complex
+            # For a production bot, you'd want to use official Instagram Basic Display API
+            # or a paid service like RapidAPI
+            
+            # For now, we'll simulate finding stories
+            print("ℹ️ Alternative API approach - would require Instagram API keys")
+            print("💡 Consider using Instagram Basic Display API for production")
+            
+            return []
+            
         except Exception as e:
-            print(f"❌ Error downloading story: {e}")
-            return None, None
+            print(f"❌ Error in alternative API: {e}")
+            return []
     
     def process_new_stories(self):
         """Check for new stories and send them"""
-        stories = self.get_instagram_stories()
+        stories = self.get_instagram_stories_web()
         
         if not stories:
             print("ℹ️ No new stories found")
@@ -197,24 +212,18 @@ class InstagramStoryBot:
         
         for story in stories:
             try:
-                # Download the story
-                filepath, media_type = self.download_story_item(story)
-                
-                if not filepath:
-                    continue
-                
                 # Prepare caption
-                caption = f"📸 Story מ-@{story['username']}\n🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}"
+                caption = f"📸 Story מ-@{self.instagram_username}\n🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}"
                 
                 # Send to Telegram
                 success = False
-                if media_type == 'video':
-                    success = self.send_telegram_video(filepath, caption)
-                elif media_type == 'photo':
-                    success = self.send_telegram_photo(filepath, caption)
+                if story['type'] == 'video':
+                    success = self.send_telegram_video(story['url'], caption)
+                elif story['type'] == 'photo':
+                    success = self.send_telegram_photo(story['url'], caption)
                 
                 if success:
-                    print(f"✅ Sent story from @{story['username']}")
+                    print(f"✅ Sent story from @{self.instagram_username}")
                     
                     # Mark as sent
                     self.sent_stories.append(story['id'])
@@ -225,16 +234,10 @@ class InstagramStoryBot:
                         self.sent_stories = self.sent_stories[-100:]
                         self.save_sent_stories()
                 else:
-                    print(f"❌ Failed to send story from @{story['username']}")
-                
-                # Clean up downloaded file
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
+                    print(f"❌ Failed to send story from @{self.instagram_username}")
                 
                 # Wait between sends to avoid rate limiting
-                time.sleep(2)
+                time.sleep(3)
                 
             except Exception as e:
                 print(f"❌ Error processing story: {e}")
@@ -247,7 +250,7 @@ class InstagramStoryBot:
         print(f"⏱️ Checking every 5 minutes...")
         
         # Send startup message
-        self.send_telegram_message(f"🤖 Instagram Story Bot הופעל!\n👤 עוקב אחר: @{self.instagram_username}")
+        self.send_telegram_message(f"🤖 Instagram Story Bot V2 הופעל!\n👤 עוקב אחר: @{self.instagram_username}\n🔧 משתמש בשיטת Web Scraping")
         
         # Send existing stories on first run
         print("📸 Checking for existing stories to send...")
