@@ -356,14 +356,22 @@ class InstagramStoryBot:
                     if story_id in self.sent_stories:
                         continue
                     
-                    # Get media URL
-                    if story.video_url:
+                    # Get media URL - Fix the variable names
+                    media_url = None
+                    media_type = None
+                    
+                    if hasattr(story, 'video_url') and story.video_url:
                         media_url = story.video_url
                         media_type = 'video'
-                    elif story.thumbnail_url:
+                    elif hasattr(story, 'thumbnail_url') and story.thumbnail_url:
                         media_url = story.thumbnail_url
                         media_type = 'photo'
-                    else:
+                    elif hasattr(story, 'url') and story.url:
+                        media_url = story.url
+                        media_type = 'photo'
+                    
+                    if not media_url:
+                        print(f"⚠️ No media URL found for story {story.pk}")
                         continue
                     
                     story_data = {
