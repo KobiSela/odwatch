@@ -249,6 +249,10 @@ class InstagramStoryBot:
         # Send startup message
         self.send_telegram_message(f"🤖 Instagram Story Bot הופעל!\n👤 עוקב אחר: @{self.instagram_username}")
         
+        # Send existing stories on first run
+        print("📸 Checking for existing stories to send...")
+        self.process_new_stories()
+        
         while True:
             try:
                 self.process_new_stories()
