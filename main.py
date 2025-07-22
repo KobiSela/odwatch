@@ -30,6 +30,13 @@ class InstagramStoryBot:
         self.instagram_client = None
         self.session_file = "ig_session.json"
         
+        # Rate limiting and error tracking
+        self.consecutive_errors = 0
+        self.max_errors = 5
+        self.last_request_time = 0
+        self.min_request_interval = 60  # Minimum 1 minute between requests
+        self.is_client_working = True
+        
         # Initialize Instagram client
         self.init_instagram_client()
         
@@ -204,6 +211,79 @@ class InstagramStoryBot:
             print(f"❌ Error sending photo: {e}")
             return False
     
+    def wait_for_rate_limit(self):
+        """Wait to avoid rate limiting"""
+        current_time = time.time()
+        time_since_last_request = current_time - self.last_request_time
+        
+        if time_since_last_request < self.min_request_interval:
+            wait_time = self.min_request_interval - time_since_last_request
+            print(f"⏳ Rate limiting: waiting {wait_time:.1f} seconds...")
+            time.sleep(wait_time)
+        
+        self.last_request_time = time.time()
+    
+    def handle_instagram_error(self, error):
+        """Handle Instagram API errors and decide if should stop"""
+        self.consecutive_errors += 1
+        print(f"❌ Instagram error ({self.consecutive_errors}/{self.max_errors}): {error}")
+        
+        # Check for specific error types that mean we should stop
+        error_str = str(error).lower()
+        
+        if any(keyword in error_str for keyword in [
+            'challenge', 'login_required', 'checkpoint', 'banned', 'spam', 
+            'rate limit', 'too many requests', 'forbidden'
+        ]):
+            print(f"🚨 Critical error detected: {error}")
+            self.is_client_working = False
+            self.send_telegram_message(
+                f"🚨 Instagram Bot נעצר!\n"
+                f"❌ שגיאה קריטית: {error}\n\n"
+                f"💡 ייתכן שהחשבון נחסם או צריך verification.\n"
+                f"בדוק את החשבון Instagram ועדכן sessionid חדש."
+            )
+            return False
+        
+        # If too many consecutive errors, stop the client
+        if self.consecutive_errors >= self.max_errors:
+            print(f"🛑 Too many consecutive errors ({self.max_errors}), stopping Instagram client")
+            self.is_client_working = False
+            self.send_telegram_message(
+                f"🚨 Instagram Bot נעצר!\n"
+                f"❌ יותר מדי שגיאות רצופות: {self.max_errors}\n\n"
+                f"💡 ייתכן שיש בעיה עם החיבור או שהחשבון נחסם.\n"
+                f"בדוק את החשבון ונסה להפעיל מחדש."
+            )
+            return False
+        
+        return True
+    
+    def reset_error_counter(self):
+        """Reset error counter after successful operation"""
+        if self.consecutive_errors > 0:
+            print(f"✅ Instagram working again, reset error counter")
+            self.consecutive_errors = 0
+        """Send video URL to Telegram"""
+        url = f"{self.base_url}/sendVideo"
+        payload = {
+            'chat_id': self.chat_id,
+            'video': video_url,
+            'caption': caption[:1024],
+            'parse_mode': 'HTML'
+        }
+        
+        try:
+            response = requests.post(url, data=payload, timeout=60)
+            if response.status_code == 200:
+                return True
+            else:
+                print(f"❌ Telegram video error: {response.text}")
+                return False
+        except Exception as e:
+            print(f"❌ Error sending video: {e}")
+            return False
+    
     def send_telegram_video(self, video_url, caption=""):
         """Send video URL to Telegram"""
         url = f"{self.base_url}/sendVideo"
@@ -226,11 +306,14 @@ class InstagramStoryBot:
             return False
     
     def get_user_stories(self):
-        """Get real Instagram stories using instagrapi"""
+        """Get real Instagram stories using instagrapi with rate limiting"""
         try:
-            if not self.instagram_client:
-                print("❌ Instagram client not initialized")
+            if not self.instagram_client or not self.is_client_working:
+                print("❌ Instagram client not available or disabled")
                 return []
+            
+            # Rate limiting
+            self.wait_for_rate_limit()
                 
             print(f"📱 Getting stories for @{self.instagram_username}...")
             
@@ -239,13 +322,25 @@ class InstagramStoryBot:
                 user_info = self.instagram_client.user_info_by_username(self.instagram_username)
                 user_id = user_info.pk
                 print(f"✅ Found user: {user_info.full_name} (@{user_info.username})")
+                
+                # Reset error counter on success
+                self.reset_error_counter()
+                
             except Exception as e:
                 print(f"❌ User not found: {e}")
+                if not self.handle_instagram_error(e):
+                    return []
                 return []
+            
+            # Small delay before next request
+            time.sleep(2)
             
             # Get user stories
             try:
                 user_stories = self.instagram_client.user_stories(user_id)
+                
+                # Reset error counter on success
+                self.reset_error_counter()
                 
                 if not user_stories:
                     print(f"ℹ️ No active stories found for @{self.instagram_username}")
@@ -286,10 +381,13 @@ class InstagramStoryBot:
                 
             except Exception as e:
                 print(f"❌ Error getting stories: {e}")
+                if not self.handle_instagram_error(e):
+                    return []
                 return []
                 
         except Exception as e:
             print(f"❌ Error in get_user_stories: {e}")
+            self.handle_instagram_error(e)
             return []
     
     def get_demo_stories(self):
@@ -323,70 +421,69 @@ class InstagramStoryBot:
     def process_new_stories(self):
         """Check for new stories and send them"""
         
-        # Try to get real stories first
-        stories = self.get_user_stories()
+        # Only try to get real stories if Instagram client is working
+        if self.instagram_client and self.is_client_working:
+            stories = self.get_user_stories()
+            
+            if stories:
+                print(f"📱 Processing {len(stories)} new real stories")
+                
+                for story in stories:
+                    try:
+                        # Prepare caption for real stories
+                        caption = (
+                            f"📸 🎯 REAL Story מ-@{self.instagram_username}\n"
+                            f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
+                            f"✅ הבוט עובד עם Instagram Private API!\n"
+                            f"🔥 זהו סטורי אמיתי מהאינסטגרם!"
+                        )
+                        
+                        # Send to Telegram based on type
+                        success = False
+                        if story['type'] == 'video':
+                            success = self.send_telegram_video(story['url'], caption)
+                        elif story['type'] == 'photo':
+                            success = self.send_telegram_photo(story['url'], caption)
+                        
+                        if success:
+                            print(f"✅ Sent real story: {story['id']}")
+                            
+                            # Mark as sent
+                            self.sent_stories.append(story['id'])
+                            self.save_sent_stories()
+                            
+                            # Clean up old entries
+                            if len(self.sent_stories) > 100:
+                                self.sent_stories = self.sent_stories[-100:]
+                                self.save_sent_stories()
+                        else:
+                            print(f"❌ Failed to send story: {story['id']}")
+                        
+                        # Wait between sends to avoid spam
+                        time.sleep(5)
+                        
+                    except Exception as e:
+                        print(f"❌ Error processing story: {e}")
+                
+                return  # Exit after processing real stories
+            else:
+                print("ℹ️ No new real stories found")
+                return  # Don't fall back to demo mode
         
-        # If no real stories, try demo mode
-        if not stories:
-            stories = self.get_demo_stories()
-        
-        if not stories:
-            print("ℹ️ No new stories found")
+        # Only use demo mode if Instagram client is disabled/not working
+        elif not self.is_client_working:
+            print("⚠️ Instagram client disabled due to errors - Bot will stop checking")
             return
-        
-        print(f"📱 Processing {len(stories)} new stories")
-        
-        for story in stories:
-            try:
-                # Prepare caption
-                if 'real_' in story['id']:
-                    caption = (
-                        f"📸 🎯 REAL Story מ-@{self.instagram_username}\n"
-                        f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
-                        f"✅ הבוט עובד עם Instagram Private API!\n"
-                        f"🔥 זהו סטורי אמיתי מהאינסטגרם!"
-                    )
-                else:
-                    caption = (
-                        f"📸 Demo Story מ-@{self.instagram_username}\n"
-                        f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
-                        f"🤖 Demo Mode - Instagram API לא זמין כרגע\n"
-                        f"💡 יש צורך ב-sessionid או credentials נכונים"
-                    )
-                
-                # Send to Telegram based on type
-                success = False
-                if story['type'] == 'video':
-                    success = self.send_telegram_video(story['url'], caption)
-                elif story['type'] == 'photo':
-                    success = self.send_telegram_photo(story['url'], caption)
-                
-                if success:
-                    print(f"✅ Sent story: {story['id']}")
-                    
-                    # Mark as sent
-                    self.sent_stories.append(story['id'])
-                    self.save_sent_stories()
-                    
-                    # Clean up old entries
-                    if len(self.sent_stories) > 100:
-                        self.sent_stories = self.sent_stories[-100:]
-                        self.save_sent_stories()
-                else:
-                    print(f"❌ Failed to send story: {story['id']}")
-                
-                # Wait between sends
-                time.sleep(3)
-                
-            except Exception as e:
-                print(f"❌ Error processing story: {e}")
+        else:
+            print("⚠️ Instagram client not available")
+            return
     
     def start_monitoring(self):
         """Start monitoring Instagram stories"""
         print(f"🚀 Starting Instagram Story Monitor...")
         print(f"👤 Monitoring: @{self.instagram_username}")
         print(f"📱 Sending to Telegram chat: {self.chat_id}")
-        print(f"⏱️ Checking every 5 minutes...")
+        print(f"⏱️ Checking every 30 minutes...")
         
         # Send startup message based on authentication method
         if self.instagram_client:
@@ -396,7 +493,7 @@ class InstagramStoryBot:
                     f"👤 עוקב אחר: @{self.instagram_username}\n\n"
                     f"🔑 מחובר עם Session ID!\n"
                     f"✅ Instagram API פעיל\n"
-                    f"📱 יקבל סטוריז אמיתיים כל 5 דקות!"
+                    f"📱 יקבל סטוריז אמיתיים כל 30 דקות!"
                 )
             elif self.ig_username:
                 startup_msg = (
@@ -404,7 +501,7 @@ class InstagramStoryBot:
                     f"👤 עוקב אחר: @{self.instagram_username}\n\n"
                     f"🔥 מחובר לInstagram Private API!\n"
                     f"✅ חשבון Instagram: @{self.ig_username}\n"
-                    f"📱 יקבל סטוריז אמיתיים כל 5 דקות!"
+                    f"📱 יקבל סטוריז אמיתיים כל 30 דקות!"
                 )
             else:
                 startup_msg = (
@@ -431,18 +528,28 @@ class InstagramStoryBot:
         
         while True:
             try:
+                # Check if Instagram client is still working
+                if not self.is_client_working:
+                    print("🛑 Instagram client disabled due to errors. Bot stopped.")
+                    self.send_telegram_message(
+                        f"🛑 Instagram Bot נעצר סופית!\n"
+                        f"❌ יותר מדי שגיאות או בעיות אבטחה.\n\n"
+                        f"💡 לאחר שתתקן את הבעיה, הפעל מחדש את הבוט."
+                    )
+                    break
+                
                 self.process_new_stories()
                 next_check = datetime.now().strftime('%H:%M:%S')
-                print(f"⏳ Next check in 5 minutes... ({next_check})")
-                time.sleep(300)  # 5 minutes
+                print(f"⏳ Next check in 30 minutes... ({next_check})")
+                time.sleep(1800)  # 30 minutes
                 
             except KeyboardInterrupt:
                 print("\n🛑 Bot stopped by user")
                 break
             except Exception as e:
                 print(f"❌ Unexpected error: {e}")
-                print("⏳ Retrying in 2 minutes...")
-                time.sleep(120)
+                print("⏳ Retrying in 5 minutes...")
+                time.sleep(300)  # Shorter retry interval
 
 def main():
     # Configuration - Environment Variables
