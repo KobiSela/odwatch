@@ -143,23 +143,48 @@ class InstagramStoryBot:
                         
                         print(f"🔍 Processing story {i+1}/{len(user_stories)}: {story.pk}")
                         
-                        # Try to get media URL in the safest way possible
+                        # Try to get REAL media URL
                         media_url = None
-                        media_type = 'photo'  # Default to photo
+                        media_type = 'photo'
                         
-                        # Method 1: Try to download and get URL
+                        # Method 1: Try direct URL access
                         try:
-                            # This is the safest method - download the story
-                            media_path = self.instagram_client.story_download(story.pk)
-                            if media_path:
-                                # For now, we'll use a placeholder URL since we can't upload files directly
-                                # In a real implementation, you'd upload to a file hosting service
-                                media_url = f"https://picsum.photos/1080/1920?random={story.pk}"
-                                print(f"✅ Story {story.pk} processed successfully")
-                        except Exception as download_error:
-                            print(f"⚠️ Could not download story {story.pk}: {download_error}")
-                            # Use a placeholder image
+                            # Check story attributes safely
+                            if hasattr(story, 'video_url') and story.video_url:
+                                media_url = story.video_url
+                                media_type = 'video'
+                                print(f"✅ Found video URL for story {story.pk}")
+                            elif hasattr(story, 'thumbnail_url') and story.thumbnail_url:
+                                media_url = story.thumbnail_url
+                                media_type = 'photo'
+                                print(f"✅ Found thumbnail URL for story {story.pk}")
+                            elif hasattr(story, 'url') and story.url:
+                                media_url = story.url
+                                media_type = 'photo'
+                                print(f"✅ Found image URL for story {story.pk}")
+                        except Exception as url_error:
+                            print(f"⚠️ Could not get direct URL for story {story.pk}: {url_error}")
+                        
+                        # Method 2: If no direct URL, try to get story info
+                        if not media_url:
+                            try:
+                                story_info = self.instagram_client.story_info(story.pk)
+                                if story_info and hasattr(story_info, 'video_url') and story_info.video_url:
+                                    media_url = story_info.video_url
+                                    media_type = 'video'
+                                    print(f"✅ Found video URL via story_info for {story.pk}")
+                                elif story_info and hasattr(story_info, 'thumbnail_url') and story_info.thumbnail_url:
+                                    media_url = story_info.thumbnail_url
+                                    media_type = 'photo'
+                                    print(f"✅ Found thumbnail URL via story_info for {story.pk}")
+                            except Exception as info_error:
+                                print(f"⚠️ Could not get story_info for {story.pk}: {info_error}")
+                        
+                        # Method 3: If still no URL, use placeholder but mark it
+                        if not media_url:
                             media_url = f"https://picsum.photos/1080/1920?random={story.pk}"
+                            media_type = 'placeholder'
+                            print(f"⚠️ Using placeholder for story {story.pk}")
                         
                         if media_url:
                             story_data = {
@@ -206,12 +231,20 @@ class InstagramStoryBot:
         
         for story in stories:
             try:
-                caption = (
-                    f"📸 🎯 REAL Story מ-@{self.instagram_username}\n"
-                    f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
-                    f"✅ Instagram Story Bot פועל!\n"
-                    f"🔥 סטורי מ-Instagram Private API"
-                )
+                if story['type'] == 'placeholder':
+                    caption = (
+                        f"📸 🎯 Story מ-@{self.instagram_username}\n"
+                        f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
+                        f"⚠️ לא הצלחתי לקבל תמונה אמיתית\n"
+                        f"✅ אבל זיהיתי שיש סטורי חדש!"
+                    )
+                else:
+                    caption = (
+                        f"📸 🎯 REAL Story מ-@{self.instagram_username}\n"
+                        f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
+                        f"✅ Instagram Story Bot פועל!\n"
+                        f"🔥 סטורי אמיתי מ-Instagram!"
+                    )
                 
                 success = False
                 if story['type'] == 'video':
@@ -220,7 +253,7 @@ class InstagramStoryBot:
                     success = self.send_telegram_photo(story['url'], caption)
                 
                 if success:
-                    print(f"✅ Sent story: {story['id']}")
+                    print(f"✅ Sent story: {story['id']} ({story['type']})")
                     self.sent_stories.append(story['id'])
                     
                     # Keep only last 50 sent stories
