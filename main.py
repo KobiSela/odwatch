@@ -3,9 +3,13 @@ import time
 import json
 import os
 from datetime import datetime
+import pytz
 from instagrapi import Client
 import random
 import urllib.parse
+
+# Israel timezone
+ISRAEL_TZ = pytz.timezone('Asia/Jerusalem')
 
 class InstagramStoryBot:
     def __init__(self, bot_token, chat_id, instagram_username, ig_sessionid=None):
@@ -191,7 +195,7 @@ class InstagramStoryBot:
                                 'id': story_id,
                                 'url': media_url,
                                 'type': media_type,
-                                'timestamp': getattr(story, 'taken_at', datetime.now()),
+                                'timestamp': getattr(story, 'taken_at', datetime.now(ISRAEL_TZ)),
                                 'story_pk': story.pk
                             }
                             
@@ -231,19 +235,23 @@ class InstagramStoryBot:
         
         for story in stories:
             try:
+                # Convert timestamp to Israel time
+                if story['timestamp'].tzinfo is None:
+                    # If no timezone info, assume UTC and convert to Israel time
+                    story_time = pytz.UTC.localize(story['timestamp']).astimezone(ISRAEL_TZ)
+                else:
+                    # If timezone info exists, convert to Israel time
+                    story_time = story['timestamp'].astimezone(ISRAEL_TZ)
+                
                 if story['type'] == 'placeholder':
                     caption = (
-                        f"📸 🎯 Story מ-@{self.instagram_username}\n"
-                        f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
-                        f"⚠️ לא הצלחתי לקבל תמונה אמיתית\n"
-                        f"✅ אבל זיהיתי שיש סטורי חדש!"
+                        f"📸 Story מ-@{self.instagram_username}\n"
+                        f"🕐 {story_time.strftime('%d/%m/%Y %H:%M')}"
                     )
                 else:
                     caption = (
-                        f"📸 🎯 REAL Story מ-@{self.instagram_username}\n"
-                        f"🕐 {story['timestamp'].strftime('%d/%m/%Y %H:%M')}\n\n"
-                        f"✅ Instagram Story Bot פועל!\n"
-                        f"🔥 סטורי אמיתי מ-Instagram!"
+                        f"📸 Story מ-@{self.instagram_username}\n"
+                        f"🕐 {story_time.strftime('%d/%m/%Y %H:%M')}"
                     )
                 
                 success = False
@@ -276,19 +284,9 @@ class InstagramStoryBot:
         print(f"⏱️ Checking every 30 minutes...")
         
         if self.is_working:
-            startup_msg = (
-                f"🤖 Instagram Story Bot V7 (Simple) הופעל!\n"
-                f"👤 עוקב אחר: @{self.instagram_username}\n\n"
-                f"✅ מחובר לInstagram!\n"
-                f"📱 יקבל סטוריז כל 30 דקות!"
-            )
+            startup_msg = f"🤖 Instagram Bot הופעל\n👤 עוקב אחר: @{self.instagram_username}"
         else:
-            startup_msg = (
-                f"🤖 Instagram Story Bot V7 (Simple) הופעל!\n"
-                f"👤 עוקב אחר: @{self.instagram_username}\n\n"
-                f"❌ לא מחובר לInstagram\n"
-                f"💡 בדוק את IG_SESSIONID"
-            )
+            startup_msg = f"🤖 Instagram Bot הופעל\n❌ לא מחובר לInstagram"
         
         self.send_telegram_message(startup_msg)
         
