@@ -22,10 +22,43 @@ class InstagramStoryBot:
         # Track sent stories
         self.sent_stories = []
         
+        # Track followers changes
+        self.followers_file = "followers_data.json"
+        self.following_file = "following_data.json"
+        self.last_followers = self.load_followers_data()
+        self.last_following = self.load_following_data()
+        
         # Initialize Instagram client
         self.instagram_client = None
         self.is_working = False
         self.init_instagram_client()
+    
+    def get_next_check_interval(self):
+        """Calculate next check interval based on current time"""
+        current_time = datetime.now(ISRAEL_TZ)
+        current_hour = current_time.hour
+        
+        # Night hours (3 AM - 9 AM): Check every hour with random minute
+        if 3 <= current_hour < 9:
+            # Random minute between 0-59 for next hour
+            random_minutes = random.randint(0, 59)
+            # Time until next hour + random minutes
+            minutes_to_next_hour = 60 - current_time.minute
+            total_minutes = minutes_to_next_hour + random_minutes
+            
+            print(f"🌙 Night mode: Next check in {total_minutes} minutes (at {(current_time.hour + 1) % 24}:{random_minutes:02d})")
+            return total_minutes * 60  # Convert to seconds
+        
+        # Regular hours: Random interval between 30-45 minutes
+        else:
+            random_minutes = random.randint(30, 45)
+            print(f"☀️ Day mode: Next check in {random_minutes} minutes")
+            return random_minutes * 60  # Convert to seconds
+    
+    def is_night_hours(self):
+        """Check if current time is in night hours (3-9 AM)"""
+        current_hour = datetime.now(ISRAEL_TZ).hour
+        return 3 <= current_hour < 9
         
     def init_instagram_client(self):
         """Initialize Instagram client"""
@@ -57,6 +90,172 @@ class InstagramStoryBot:
             print(f"❌ Failed to initialize Instagram client: {e}")
             self.is_working = False
             return False
+    
+    def load_followers_data(self):
+        """Load previous followers data"""
+        try:
+            if os.path.exists(self.followers_file):
+                with open(self.followers_file, 'r') as f:
+                    return json.load(f)
+            return {}
+        except:
+            return {}
+    
+    def save_followers_data(self, followers_data):
+        """Save current followers data"""
+        try:
+            with open(self.followers_file, 'w') as f:
+                json.dump(followers_data, f)
+        except Exception as e:
+            print(f"❌ Error saving followers data: {e}")
+    
+    def load_following_data(self):
+        """Load previous following data"""
+        try:
+            if os.path.exists(self.following_file):
+                with open(self.following_file, 'r') as f:
+                    return json.load(f)
+            return {}
+        except:
+            return {}
+    
+    def save_following_data(self, following_data):
+        """Save current following data"""
+        try:
+            with open(self.following_file, 'w') as f:
+                json.dump(following_data, f)
+        except Exception as e:
+            print(f"❌ Error saving following data: {e}")
+    
+    def check_followers_changes(self):
+        """Check for followers changes efficiently"""
+        if not self.instagram_client or not self.is_working:
+            return
+        
+        try:
+            print(f"👥 Checking followers changes for @{self.instagram_username}...")
+            
+            # Get user info
+            user_info = self.instagram_client.user_info_by_username(self.instagram_username)
+            user_id = user_info.pk
+            
+            # Get current followers count (fast)
+            current_followers_count = user_info.follower_count
+            current_following_count = user_info.following_count
+            
+            # Check if counts changed
+            last_followers_count = self.last_followers.get('count', 0)
+            last_following_count = self.last_following.get('count', 0)
+            
+            followers_changed = current_followers_count != last_followers_count
+            following_changed = current_following_count != last_following_count
+            
+            if not followers_changed and not following_changed:
+                print(f"ℹ️ No changes in followers ({current_followers_count}) or following ({current_following_count})")
+                return
+            
+            # If counts changed, get the actual lists (only if needed)
+            messages = []
+            
+            if followers_changed:
+                print(f"📈 Followers count changed: {last_followers_count} -> {current_followers_count}")
+                
+                if current_followers_count > last_followers_count:
+                    # New followers - get recent followers (limited)
+                    try:
+                        recent_followers = list(self.instagram_client.user_followers(user_id, amount=20))
+                        
+                        # Find new followers by comparing with saved IDs
+                        last_follower_ids = set(self.last_followers.get('ids', []))
+                        
+                        new_followers = []
+                        for follower in recent_followers:
+                            if str(follower.pk) not in last_follower_ids:
+                                new_followers.append(follower)
+                        
+                        if new_followers:
+                            for follower in new_followers[:5]:  # Show max 5 new followers
+                                messages.append(f"➕ עוקב חדש: {follower.username}")
+                            
+                            if len(new_followers) > 5:
+                                messages.append(f"➕ ועוד {len(new_followers) - 5} עוקבים...")
+                        
+                        # Update saved data
+                        current_follower_ids = [str(f.pk) for f in recent_followers]
+                        self.last_followers = {
+                            'count': current_followers_count,
+                            'ids': current_follower_ids,
+                            'last_updated': datetime.now(ISRAEL_TZ).isoformat()
+                        }
+                        self.save_followers_data(self.last_followers)
+                        
+                    except Exception as e:
+                        print(f"❌ Error getting followers list: {e}")
+                        messages.append(f"📈 יש {current_followers_count - last_followers_count} עוקבים חדשים")
+                else:
+                    # Lost followers
+                    lost_count = last_followers_count - current_followers_count
+                    messages.append(f"➖ {lost_count} עוקבים הפסיקו לעקוב")
+                    
+                    # Update count only
+                    self.last_followers['count'] = current_followers_count
+                    self.save_followers_data(self.last_followers)
+            
+            if following_changed:
+                print(f"📈 Following count changed: {last_following_count} -> {current_following_count}")
+                
+                if current_following_count > last_following_count:
+                    # Started following new people
+                    try:
+                        recent_following = list(self.instagram_client.user_following(user_id, amount=20))
+                        
+                        # Find new following by comparing with saved IDs
+                        last_following_ids = set(self.last_following.get('ids', []))
+                        
+                        new_following = []
+                        for following in recent_following:
+                            if str(following.pk) not in last_following_ids:
+                                new_following.append(following)
+                        
+                        if new_following:
+                            for following in new_following[:5]:  # Show max 5 new following
+                                messages.append(f"👤 עוקב עכשיו אחרי: {following.username}")
+                            
+                            if len(new_following) > 5:
+                                messages.append(f"👤 ועוד {len(new_following) - 5} חשבונות...")
+                        
+                        # Update saved data
+                        current_following_ids = [str(f.pk) for f in recent_following]
+                        self.last_following = {
+                            'count': current_following_count,
+                            'ids': current_following_ids,
+                            'last_updated': datetime.now(ISRAEL_TZ).isoformat()
+                        }
+                        self.save_following_data(self.last_following)
+                        
+                    except Exception as e:
+                        print(f"❌ Error getting following list: {e}")
+                        messages.append(f"👤 עוקב אחרי {current_following_count - last_following_count} חשבונות חדשים")
+                else:
+                    # Unfollowed people
+                    unfollowed_count = last_following_count - current_following_count
+                    messages.append(f"➖ הפסיק לעקוב אחרי {unfollowed_count} חשבונות")
+                    
+                    # Update count only
+                    self.last_following['count'] = current_following_count
+                    self.save_following_data(self.last_following)
+            
+            # Send summary message
+            if messages:
+                summary_time = datetime.now(ISRAEL_TZ).strftime('%d/%m/%Y %H:%M')
+                summary_msg = f"👥 עדכון עוקבים - @{self.instagram_username}\n🕐 {summary_time}\n\n" + "\n".join(messages)
+                self.send_telegram_message(summary_msg)
+            
+            # Small delay to avoid rate limiting
+            time.sleep(3)
+            
+        except Exception as e:
+            print(f"❌ Error checking followers changes: {e}")
     
     def send_telegram_message(self, message):
         """Send text message to Telegram"""
@@ -281,7 +480,7 @@ class InstagramStoryBot:
         print(f"🚀 Starting Instagram Story Monitor...")
         print(f"👤 Monitoring: @{self.instagram_username}")
         print(f"📱 Sending to Telegram chat: {self.chat_id}")
-        print(f"⏱️ Checking every 30 minutes...")
+        print(f"⏱️ Smart timing: 30-45min (day) | 60min (3-9 AM)")
         
         if self.is_working:
             startup_msg = f"🤖 Instagram Bot הופעל\n👤 עוקב אחר: @{self.instagram_username}"
@@ -294,25 +493,43 @@ class InstagramStoryBot:
         if self.is_working:
             print("📸 Checking for stories...")
             self.process_stories()
+            
+            print("👥 Checking for followers changes...")
+            self.check_followers_changes()
         
-        # Main loop
+        # Main loop with smart timing
         while True:
             try:
                 if not self.is_working:
                     print("🛑 Instagram client not working, stopping...")
                     break
                 
+                # Get next interval based on time
+                next_interval = self.get_next_check_interval()
+                
+                # Show next check time in Israel timezone
+                current_time = datetime.now(ISRAEL_TZ)
+                next_check_time = datetime.fromtimestamp(
+                    current_time.timestamp() + next_interval, 
+                    tz=ISRAEL_TZ
+                )
+                
+                print(f"⏳ Waiting until {next_check_time.strftime('%H:%M:%S')}...")
+                time.sleep(next_interval)
+                
+                # After sleep, do the checks
+                print(f"🔄 Running checks at {datetime.now(ISRAEL_TZ).strftime('%H:%M:%S')}")
                 self.process_stories()
-                next_check = datetime.now().strftime('%H:%M:%S')
-                print(f"⏳ Next check in 30 minutes... ({next_check})")
-                time.sleep(1800)  # 30 minutes
+                self.check_followers_changes()
                 
             except KeyboardInterrupt:
                 print("\n🛑 Bot stopped by user")
                 break
             except Exception as e:
                 print(f"❌ Unexpected error: {e}")
-                time.sleep(300)  # 5 minutes on error
+                # On error, wait 5 minutes before retry
+                print("⏳ Error occurred, retrying in 5 minutes...")
+                time.sleep(300)
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
