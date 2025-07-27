@@ -152,7 +152,7 @@ class InstagramStoryBot:
             
             if not followers_changed and not following_changed:
                 print(f"ℹ️ No changes in followers ({current_followers_count}) or following ({current_following_count})")
-                return
+                return  # Exit early - no telegram message
             
             # If counts changed, get the actual lists (only if needed)
             messages = []
@@ -245,11 +245,14 @@ class InstagramStoryBot:
                     self.last_following['count'] = current_following_count
                     self.save_following_data(self.last_following)
             
-            # Send summary message
+            # Send summary message ONLY if there are actual changes
             if messages:
                 summary_time = datetime.now(ISRAEL_TZ).strftime('%d/%m/%Y %H:%M')
                 summary_msg = f"👥 עדכון עוקבים - @{self.instagram_username}\n🕐 {summary_time}\n\n" + "\n".join(messages)
                 self.send_telegram_message(summary_msg)
+                print(f"📱 Sent followers update to Telegram")
+            else:
+                print(f"ℹ️ Followers counts changed but couldn't identify specific users - no message sent")
             
             # Small delay to avoid rate limiting
             time.sleep(3)
