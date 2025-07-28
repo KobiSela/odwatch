@@ -38,22 +38,20 @@ class InstagramStoryBot:
         current_time = datetime.now(ISRAEL_TZ)
         current_hour = current_time.hour
         
-        # Night hours (3 AM - 9 AM): Check every hour with random minute
+        # Night hours (3 AM - 9 AM): Check every hour
         if 3 <= current_hour < 9:
-            # Random minute between 0-59 for next hour
             random_minutes = random.randint(0, 59)
-            # Time until next hour + random minutes
             minutes_to_next_hour = 60 - current_time.minute
             total_minutes = minutes_to_next_hour + random_minutes
             
-            print(f"🌙 Night mode: Next check in {total_minutes} minutes (at {(current_time.hour + 1) % 24}:{random_minutes:02d})")
-            return total_minutes * 60  # Convert to seconds
+            print(f"🌙 Night mode: Next check in {total_minutes} minutes")
+            return total_minutes * 60
         
         # Regular hours: Random interval between 30-45 minutes
         else:
             random_minutes = random.randint(30, 45)
             print(f"☀️ Day mode: Next check in {random_minutes} minutes")
-            return random_minutes * 60  # Convert to seconds
+            return random_minutes * 60
     
     def is_night_hours(self):
         """Check if current time is in night hours (3-9 AM)"""
@@ -97,7 +95,7 @@ class InstagramStoryBot:
             if os.path.exists(self.followers_file):
                 with open(self.followers_file, 'r') as f:
                     return json.load(f)
-            return {"count": None, "ids": [], "initialized": False}  # None = not initialized yet
+            return {"count": None, "ids": [], "initialized": False}
         except:
             return {"count": None, "ids": [], "initialized": False}
     
@@ -115,7 +113,7 @@ class InstagramStoryBot:
             if os.path.exists(self.following_file):
                 with open(self.following_file, 'r') as f:
                     return json.load(f)
-            return {"count": None, "ids": [], "initialized": False}  # None = not initialized yet
+            return {"count": None, "ids": [], "initialized": False}
         except:
             return {"count": None, "ids": [], "initialized": False}
     
@@ -178,7 +176,7 @@ class InstagramStoryBot:
             return False
     
     def get_user_stories(self):
-        """Get real Instagram stories - simplified version"""
+        """Get Instagram stories"""
         if not self.instagram_client or not self.is_working:
             print("❌ Instagram client not working")
             return []
@@ -191,10 +189,8 @@ class InstagramStoryBot:
             user_id = user_info.pk
             print(f"✅ Found user: {user_info.full_name} (@{user_info.username})")
             
-            # Small delay
             time.sleep(2)
             
-            # Get user stories - simple approach
             try:
                 user_stories = self.instagram_client.user_stories(user_id)
                 
@@ -216,13 +212,11 @@ class InstagramStoryBot:
                         
                         print(f"🔍 Processing story {i+1}/{len(user_stories)}: {story.pk}")
                         
-                        # Try to get REAL media URL
+                        # Get media URL
                         media_url = None
                         media_type = 'photo'
                         
-                        # Method 1: Try direct URL access
                         try:
-                            # Check story attributes safely
                             if hasattr(story, 'video_url') and getattr(story, 'video_url', None):
                                 media_url = getattr(story, 'video_url')
                                 media_type = 'video'
@@ -238,7 +232,7 @@ class InstagramStoryBot:
                         except Exception as url_error:
                             print(f"⚠️ Could not get direct URL for story {story.pk}: {url_error}")
                         
-                        # Method 2: If no direct URL, try to get story info
+                        # Try alternative method
                         if not media_url:
                             try:
                                 story_info = self.instagram_client.story_info(story.pk)
@@ -252,12 +246,6 @@ class InstagramStoryBot:
                                     print(f"✅ Found thumbnail URL via story_info for {story.pk}")
                             except Exception as info_error:
                                 print(f"⚠️ Could not get story_info for {story.pk}: {info_error}")
-                        
-                        # Method 3: If still no URL, use placeholder but mark it
-                        if not media_url:
-                            media_url = f"https://picsum.photos/1080/1920?random={story.pk}"
-                            media_type = 'placeholder'
-                            print(f"⚠️ Using placeholder for story {story.pk}")
                         
                         if media_url:
                             story_data = {
@@ -306,22 +294,12 @@ class InstagramStoryBot:
             try:
                 # Convert timestamp to Israel time
                 if story['timestamp'].tzinfo is None:
-                    # If no timezone info, assume UTC and convert to Israel time
                     story_time = pytz.UTC.localize(story['timestamp']).astimezone(ISRAEL_TZ)
                 else:
-                    # If timezone info exists, convert to Israel time
                     story_time = story['timestamp'].astimezone(ISRAEL_TZ)
                 
-                if story['type'] == 'placeholder':
-                    caption = (
-                        f"📸 Story מ-@{self.instagram_username}\n"
-                        f"🕐 {story_time.strftime('%d/%m/%Y %H:%M')}"
-                    )
-                else:
-                    caption = (
-                        f"📸 Story מ-@{self.instagram_username}\n"
-                        f"🕐 {story_time.strftime('%d/%m/%Y %H:%M')}"
-                    )
+                # Clean caption - just username and time
+                caption = f"@{self.instagram_username} • {story_time.strftime('%d/%m %H:%M')}"
                 
                 success = False
                 if story['type'] == 'video':
@@ -339,14 +317,13 @@ class InstagramStoryBot:
                 else:
                     print(f"❌ Failed to send story: {story['id']}")
                 
-                # Wait between sends
                 time.sleep(5)
                 
             except Exception as e:
                 print(f"❌ Error processing story: {e}")
     
     def check_followers_changes(self):
-        """Check for followers changes efficiently - FIXED VERSION"""
+        """Check for followers changes"""
         if not self.instagram_client or not self.is_working:
             print("⚠️ Instagram client not working, skipping followers check")
             return
@@ -358,7 +335,6 @@ class InstagramStoryBot:
             user_info = self.instagram_client.user_info_by_username(self.instagram_username)
             user_id = user_info.pk
             
-            # Get current followers count (fast)
             current_followers_count = user_info.follower_count
             current_following_count = user_info.following_count
             
@@ -366,9 +342,8 @@ class InstagramStoryBot:
             is_first_run = not self.last_followers.get('initialized', False) or not self.last_following.get('initialized', False)
             
             if is_first_run:
-                print("🆕 First run - initializing followers data without sending message")
+                print("🆕 First run - initializing followers data")
                 
-                # Save initial data
                 self.last_followers = {
                     'count': current_followers_count,
                     'ids': [],
@@ -386,7 +361,7 @@ class InstagramStoryBot:
                 self.save_following_data(self.last_following)
                 
                 print(f"✅ Initialized: {current_followers_count} followers, {current_following_count} following")
-                return  # EXIT HERE - no message sent
+                return
             
             # Get previous counts
             last_followers_count = self.last_followers.get('count', 0)
@@ -399,27 +374,22 @@ class InstagramStoryBot:
             followers_changed = current_followers_count != last_followers_count
             following_changed = current_following_count != last_following_count
             
-            # Early exit if no changes
             if not followers_changed and not following_changed:
-                print(f"ℹ️ No changes detected - no message sent")
+                print(f"ℹ️ No changes detected")
                 return
             
-            # Only proceed if there are actual changes
             messages = []
             
             if followers_changed:
                 print(f"📈 Followers count changed: {last_followers_count} -> {current_followers_count}")
                 
                 if current_followers_count > last_followers_count:
-                    # New followers
                     new_count = current_followers_count - last_followers_count
-                    messages.append(f"➕ {new_count} עוקבים חדשים")
+                    messages.append(f"➕ {new_count} new followers")
                 else:
-                    # Lost followers
                     lost_count = last_followers_count - current_followers_count
-                    messages.append(f"➖ {lost_count} עוקבים הפסיקו לעקוב")
+                    messages.append(f"➖ {lost_count} unfollowed")
                 
-                # Update count
                 self.last_followers['count'] = current_followers_count
                 self.save_followers_data(self.last_followers)
             
@@ -427,26 +397,22 @@ class InstagramStoryBot:
                 print(f"📈 Following count changed: {last_following_count} -> {current_following_count}")
                 
                 if current_following_count > last_following_count:
-                    # Started following new people
                     new_count = current_following_count - last_following_count
-                    messages.append(f"👤 עוקב אחרי {new_count} חשבונות חדשים")
+                    messages.append(f"👤 Following {new_count} new accounts")
                 else:
-                    # Unfollowed people
                     unfollowed_count = last_following_count - current_following_count
-                    messages.append(f"➖ הפסיק לעקוב אחרי {unfollowed_count} חשבונות")
+                    messages.append(f"➖ Unfollowed {unfollowed_count} accounts")
                 
-                # Update count
                 self.last_following['count'] = current_following_count
                 self.save_following_data(self.last_following)
             
-            # Send message ONLY if there are actual changes
+            # Send clean message
             if messages:
-                summary_time = datetime.now(ISRAEL_TZ).strftime('%d/%m/%Y %H:%M')
-                summary_msg = f"👥 עדכון עוקבים - @{self.instagram_username}\n🕐 {summary_time}\n\n" + "\n".join(messages)
+                summary_time = datetime.now(ISRAEL_TZ).strftime('%d/%m %H:%M')
+                summary_msg = f"@{self.instagram_username} • {summary_time}\n" + "\n".join(messages)
                 self.send_telegram_message(summary_msg)
                 print(f"📱 Sent followers update: {len(messages)} changes")
             
-            # Small delay to avoid rate limiting
             time.sleep(3)
             
         except Exception as e:
@@ -460,9 +426,9 @@ class InstagramStoryBot:
         print(f"⏱️ Smart timing: 30-45min (day) | 60min (3-9 AM)")
         
         if self.is_working:
-            startup_msg = f"🤖 Instagram Bot הופעל\n👤 עוקב אחר: @{self.instagram_username}"
+            startup_msg = f"Instagram Bot • @{self.instagram_username}"
         else:
-            startup_msg = f"🤖 Instagram Bot הופעל\n❌ לא מחובר לInstagram"
+            startup_msg = f"Instagram Bot • Not connected"
         
         self.send_telegram_message(startup_msg)
         
@@ -474,17 +440,15 @@ class InstagramStoryBot:
             print("👥 Checking for followers changes...")
             self.check_followers_changes()
         
-        # Main loop with smart timing
+        # Main loop
         while True:
             try:
                 if not self.is_working:
                     print("🛑 Instagram client not working, stopping...")
                     break
                 
-                # Get next interval based on time
                 next_interval = self.get_next_check_interval()
                 
-                # Show next check time in Israel timezone
                 current_time = datetime.now(ISRAEL_TZ)
                 next_check_time = datetime.fromtimestamp(
                     current_time.timestamp() + next_interval, 
@@ -494,7 +458,6 @@ class InstagramStoryBot:
                 print(f"⏳ Waiting until {next_check_time.strftime('%H:%M:%S')}...")
                 time.sleep(next_interval)
                 
-                # After sleep, do the checks
                 print(f"🔄 Running checks at {datetime.now(ISRAEL_TZ).strftime('%H:%M:%S')}")
                 self.process_stories()
                 self.check_followers_changes()
@@ -504,7 +467,6 @@ class InstagramStoryBot:
                 break
             except Exception as e:
                 print(f"❌ Unexpected error: {e}")
-                # On error, wait 5 minutes before retry
                 print("⏳ Error occurred, retrying in 5 minutes...")
                 time.sleep(300)
 
@@ -518,7 +480,7 @@ def main():
         print("❌ Missing required environment variables!")
         return
     
-    print(f"🚀 Starting simple bot...")
+    print(f"🚀 Starting bot...")
     print(f"👤 Target: @{INSTAGRAM_USERNAME}")
     
     if IG_SESSIONID:
