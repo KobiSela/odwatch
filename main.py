@@ -97,9 +97,9 @@ class InstagramStoryBot:
             if os.path.exists(self.followers_file):
                 with open(self.followers_file, 'r') as f:
                     return json.load(f)
-            return {}
+            return {"count": None, "ids": [], "initialized": False}  # None = not initialized yet
         except:
-            return {}
+            return {"count": None, "ids": [], "initialized": False}
     
     def save_followers_data(self, followers_data):
         """Save current followers data"""
@@ -115,9 +115,9 @@ class InstagramStoryBot:
             if os.path.exists(self.following_file):
                 with open(self.following_file, 'r') as f:
                     return json.load(f)
-            return {}
+            return {"count": None, "ids": [], "initialized": False}  # None = not initialized yet
         except:
-            return {}
+            return {"count": None, "ids": [], "initialized": False}
     
     def save_following_data(self, following_data):
         """Save current following data"""
@@ -126,139 +126,6 @@ class InstagramStoryBot:
                 json.dump(following_data, f)
         except Exception as e:
             print(f"❌ Error saving following data: {e}")
-    
-    def check_followers_changes(self):
-        """Check for followers changes efficiently"""
-        if not self.instagram_client or not self.is_working:
-            return
-        
-        try:
-            print(f"👥 Checking followers changes for @{self.instagram_username}...")
-            
-            # Get user info
-            user_info = self.instagram_client.user_info_by_username(self.instagram_username)
-            user_id = user_info.pk
-            
-            # Get current followers count (fast)
-            current_followers_count = user_info.follower_count
-            current_following_count = user_info.following_count
-            
-            # Check if counts changed
-            last_followers_count = self.last_followers.get('count', 0)
-            last_following_count = self.last_following.get('count', 0)
-            
-            followers_changed = current_followers_count != last_followers_count
-            following_changed = current_following_count != last_following_count
-            
-            if not followers_changed and not following_changed:
-                print(f"ℹ️ No changes in followers ({current_followers_count}) or following ({current_following_count})")
-                return  # Exit early - no telegram message
-            
-            # If counts changed, get the actual lists (only if needed)
-            messages = []
-            
-            if followers_changed:
-                print(f"📈 Followers count changed: {last_followers_count} -> {current_followers_count}")
-                
-                if current_followers_count > last_followers_count:
-                    # New followers - get recent followers (limited)
-                    try:
-                        recent_followers = list(self.instagram_client.user_followers(user_id, amount=20))
-                        
-                        # Find new followers by comparing with saved IDs
-                        last_follower_ids = set(self.last_followers.get('ids', []))
-                        
-                        new_followers = []
-                        for follower in recent_followers:
-                            if str(follower.pk) not in last_follower_ids:
-                                new_followers.append(follower)
-                        
-                        if new_followers:
-                            for follower in new_followers[:5]:  # Show max 5 new followers
-                                messages.append(f"➕ עוקב חדש: {follower.username}")
-                            
-                            if len(new_followers) > 5:
-                                messages.append(f"➕ ועוד {len(new_followers) - 5} עוקבים...")
-                        
-                        # Update saved data
-                        current_follower_ids = [str(f.pk) for f in recent_followers]
-                        self.last_followers = {
-                            'count': current_followers_count,
-                            'ids': current_follower_ids,
-                            'last_updated': datetime.now(ISRAEL_TZ).isoformat()
-                        }
-                        self.save_followers_data(self.last_followers)
-                        
-                    except Exception as e:
-                        print(f"❌ Error getting followers list: {e}")
-                        messages.append(f"📈 יש {current_followers_count - last_followers_count} עוקבים חדשים")
-                else:
-                    # Lost followers
-                    lost_count = last_followers_count - current_followers_count
-                    messages.append(f"➖ {lost_count} עוקבים הפסיקו לעקוב")
-                    
-                    # Update count only
-                    self.last_followers['count'] = current_followers_count
-                    self.save_followers_data(self.last_followers)
-            
-            if following_changed:
-                print(f"📈 Following count changed: {last_following_count} -> {current_following_count}")
-                
-                if current_following_count > last_following_count:
-                    # Started following new people
-                    try:
-                        recent_following = list(self.instagram_client.user_following(user_id, amount=20))
-                        
-                        # Find new following by comparing with saved IDs
-                        last_following_ids = set(self.last_following.get('ids', []))
-                        
-                        new_following = []
-                        for following in recent_following:
-                            if str(following.pk) not in last_following_ids:
-                                new_following.append(following)
-                        
-                        if new_following:
-                            for following in new_following[:5]:  # Show max 5 new following
-                                messages.append(f"👤 עוקב עכשיו אחרי: {following.username}")
-                            
-                            if len(new_following) > 5:
-                                messages.append(f"👤 ועוד {len(new_following) - 5} חשבונות...")
-                        
-                        # Update saved data
-                        current_following_ids = [str(f.pk) for f in recent_following]
-                        self.last_following = {
-                            'count': current_following_count,
-                            'ids': current_following_ids,
-                            'last_updated': datetime.now(ISRAEL_TZ).isoformat()
-                        }
-                        self.save_following_data(self.last_following)
-                        
-                    except Exception as e:
-                        print(f"❌ Error getting following list: {e}")
-                        messages.append(f"👤 עוקב אחרי {current_following_count - last_following_count} חשבונות חדשים")
-                else:
-                    # Unfollowed people
-                    unfollowed_count = last_following_count - current_following_count
-                    messages.append(f"➖ הפסיק לעקוב אחרי {unfollowed_count} חשבונות")
-                    
-                    # Update count only
-                    self.last_following['count'] = current_following_count
-                    self.save_following_data(self.last_following)
-            
-            # Send summary message ONLY if there are actual changes
-            if messages:
-                summary_time = datetime.now(ISRAEL_TZ).strftime('%d/%m/%Y %H:%M')
-                summary_msg = f"👥 עדכון עוקבים - @{self.instagram_username}\n🕐 {summary_time}\n\n" + "\n".join(messages)
-                self.send_telegram_message(summary_msg)
-                print(f"📱 Sent followers update to Telegram")
-            else:
-                print(f"ℹ️ Followers counts changed but couldn't identify specific users - no message sent")
-            
-            # Small delay to avoid rate limiting
-            time.sleep(3)
-            
-        except Exception as e:
-            print(f"❌ Error checking followers changes: {e}")
     
     def send_telegram_message(self, message):
         """Send text message to Telegram"""
@@ -356,16 +223,16 @@ class InstagramStoryBot:
                         # Method 1: Try direct URL access
                         try:
                             # Check story attributes safely
-                            if hasattr(story, 'video_url') and story.video_url:
-                                media_url = story.video_url
+                            if hasattr(story, 'video_url') and getattr(story, 'video_url', None):
+                                media_url = getattr(story, 'video_url')
                                 media_type = 'video'
                                 print(f"✅ Found video URL for story {story.pk}")
-                            elif hasattr(story, 'thumbnail_url') and story.thumbnail_url:
-                                media_url = story.thumbnail_url
+                            elif hasattr(story, 'thumbnail_url') and getattr(story, 'thumbnail_url', None):
+                                media_url = getattr(story, 'thumbnail_url')
                                 media_type = 'photo'
                                 print(f"✅ Found thumbnail URL for story {story.pk}")
-                            elif hasattr(story, 'url') and story.url:
-                                media_url = story.url
+                            elif hasattr(story, 'url') and getattr(story, 'url', None):
+                                media_url = getattr(story, 'url')
                                 media_type = 'photo'
                                 print(f"✅ Found image URL for story {story.pk}")
                         except Exception as url_error:
@@ -375,12 +242,12 @@ class InstagramStoryBot:
                         if not media_url:
                             try:
                                 story_info = self.instagram_client.story_info(story.pk)
-                                if story_info and hasattr(story_info, 'video_url') and story_info.video_url:
-                                    media_url = story_info.video_url
+                                if story_info and hasattr(story_info, 'video_url') and getattr(story_info, 'video_url', None):
+                                    media_url = getattr(story_info, 'video_url')
                                     media_type = 'video'
                                     print(f"✅ Found video URL via story_info for {story.pk}")
-                                elif story_info and hasattr(story_info, 'thumbnail_url') and story_info.thumbnail_url:
-                                    media_url = story_info.thumbnail_url
+                                elif story_info and hasattr(story_info, 'thumbnail_url') and getattr(story_info, 'thumbnail_url', None):
+                                    media_url = getattr(story_info, 'thumbnail_url')
                                     media_type = 'photo'
                                     print(f"✅ Found thumbnail URL via story_info for {story.pk}")
                             except Exception as info_error:
@@ -424,7 +291,7 @@ class InstagramStoryBot:
     def process_stories(self):
         """Process and send stories"""
         if not self.is_working:
-            print("⚠️ Instagram client not working, skipping")
+            print("⚠️ Instagram client not working, skipping stories")
             return
         
         stories = self.get_user_stories()
@@ -477,6 +344,113 @@ class InstagramStoryBot:
                 
             except Exception as e:
                 print(f"❌ Error processing story: {e}")
+    
+    def check_followers_changes(self):
+        """Check for followers changes efficiently - FIXED VERSION"""
+        if not self.instagram_client or not self.is_working:
+            print("⚠️ Instagram client not working, skipping followers check")
+            return
+        
+        try:
+            print(f"👥 Checking followers changes for @{self.instagram_username}...")
+            
+            # Get user info
+            user_info = self.instagram_client.user_info_by_username(self.instagram_username)
+            user_id = user_info.pk
+            
+            # Get current followers count (fast)
+            current_followers_count = user_info.follower_count
+            current_following_count = user_info.following_count
+            
+            # Check if this is first time running
+            is_first_run = not self.last_followers.get('initialized', False) or not self.last_following.get('initialized', False)
+            
+            if is_first_run:
+                print("🆕 First run - initializing followers data without sending message")
+                
+                # Save initial data
+                self.last_followers = {
+                    'count': current_followers_count,
+                    'ids': [],
+                    'initialized': True,
+                    'last_updated': datetime.now(ISRAEL_TZ).isoformat()
+                }
+                self.last_following = {
+                    'count': current_following_count,
+                    'ids': [],
+                    'initialized': True,
+                    'last_updated': datetime.now(ISRAEL_TZ).isoformat()
+                }
+                
+                self.save_followers_data(self.last_followers)
+                self.save_following_data(self.last_following)
+                
+                print(f"✅ Initialized: {current_followers_count} followers, {current_following_count} following")
+                return  # EXIT HERE - no message sent
+            
+            # Get previous counts
+            last_followers_count = self.last_followers.get('count', 0)
+            last_following_count = self.last_following.get('count', 0)
+            
+            print(f"📊 Followers: {last_followers_count} -> {current_followers_count}")
+            print(f"📊 Following: {last_following_count} -> {current_following_count}")
+            
+            # Check for changes
+            followers_changed = current_followers_count != last_followers_count
+            following_changed = current_following_count != last_following_count
+            
+            # Early exit if no changes
+            if not followers_changed and not following_changed:
+                print(f"ℹ️ No changes detected - no message sent")
+                return
+            
+            # Only proceed if there are actual changes
+            messages = []
+            
+            if followers_changed:
+                print(f"📈 Followers count changed: {last_followers_count} -> {current_followers_count}")
+                
+                if current_followers_count > last_followers_count:
+                    # New followers
+                    new_count = current_followers_count - last_followers_count
+                    messages.append(f"➕ {new_count} עוקבים חדשים")
+                else:
+                    # Lost followers
+                    lost_count = last_followers_count - current_followers_count
+                    messages.append(f"➖ {lost_count} עוקבים הפסיקו לעקוב")
+                
+                # Update count
+                self.last_followers['count'] = current_followers_count
+                self.save_followers_data(self.last_followers)
+            
+            if following_changed:
+                print(f"📈 Following count changed: {last_following_count} -> {current_following_count}")
+                
+                if current_following_count > last_following_count:
+                    # Started following new people
+                    new_count = current_following_count - last_following_count
+                    messages.append(f"👤 עוקב אחרי {new_count} חשבונות חדשים")
+                else:
+                    # Unfollowed people
+                    unfollowed_count = last_following_count - current_following_count
+                    messages.append(f"➖ הפסיק לעקוב אחרי {unfollowed_count} חשבונות")
+                
+                # Update count
+                self.last_following['count'] = current_following_count
+                self.save_following_data(self.last_following)
+            
+            # Send message ONLY if there are actual changes
+            if messages:
+                summary_time = datetime.now(ISRAEL_TZ).strftime('%d/%m/%Y %H:%M')
+                summary_msg = f"👥 עדכון עוקבים - @{self.instagram_username}\n🕐 {summary_time}\n\n" + "\n".join(messages)
+                self.send_telegram_message(summary_msg)
+                print(f"📱 Sent followers update: {len(messages)} changes")
+            
+            # Small delay to avoid rate limiting
+            time.sleep(3)
+            
+        except Exception as e:
+            print(f"❌ Error checking followers changes: {e}")
     
     def start_monitoring(self):
         """Start monitoring"""
