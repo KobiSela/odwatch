@@ -11,7 +11,7 @@ import urllib.parse
 # Israel timezone
 ISRAEL_TZ = pytz.timezone('Asia/Jerusalem')
 
-class InstagramStoryBot:
+class StealthInstagramBot:
     def __init__(self, bot_token, chat_id, instagram_username, ig_sessionid=None):
         self.bot_token = bot_token
         self.chat_id = chat_id
@@ -28,41 +28,52 @@ class InstagramStoryBot:
         self.last_followers = self.load_followers_data()
         self.last_following = self.load_following_data()
         
-        # Initialize Instagram client
+        # Initialize Instagram client with stealth settings
         self.instagram_client = None
         self.is_working = False
+        self.last_instagram_action = 0  # Track last Instagram action
         self.init_instagram_client()
     
+    def get_stealth_delay(self):
+        """Get random delay to appear more human"""
+        # Random delay between 5-15 seconds for Instagram actions
+        return random.uniform(5, 15)
+    
     def get_next_check_interval(self):
-        """Calculate next check interval based on current time"""
+        """Calculate next check interval - EXTRA LONG intervals"""
         current_time = datetime.now(ISRAEL_TZ)
         current_hour = current_time.hour
         
-        # Night hours (3 AM - 9 AM): Check every hour
-        if 3 <= current_hour < 9:
-            random_minutes = random.randint(0, 59)
-            minutes_to_next_hour = 60 - current_time.minute
-            total_minutes = minutes_to_next_hour + random_minutes
-            
-            print(f"🌙 Night mode: Next check in {total_minutes} minutes")
-            return total_minutes * 60
+        # Night hours (11 PM - 8 AM): Check every 4-8 hours
+        if current_hour >= 23 or current_hour < 8:
+            random_hours = random.uniform(4, 8)  # 4-8 hours
+            minutes = int(random_hours * 60)
+            print(f"🌙 Night mode: Next check in {random_hours:.1f} hours")
+            return minutes * 60
         
-        # Regular hours: Random interval between 30-45 minutes
+        # Day hours: Check every 2-4 hours (much longer than before)
         else:
-            random_minutes = random.randint(30, 45)
-            print(f"☀️ Day mode: Next check in {random_minutes} minutes")
-            return random_minutes * 60
+            random_hours = random.uniform(2, 4)  # 2-4 hours
+            minutes = int(random_hours * 60)
+            print(f"☀️ Day mode: Next check in {random_hours:.1f} hours")
+            return minutes * 60
     
-    def is_night_hours(self):
-        """Check if current time is in night hours (3-9 AM)"""
-        current_hour = datetime.now(ISRAEL_TZ).hour
-        return 3 <= current_hour < 9
+    def should_skip_this_check(self):
+        """Randomly skip some checks to be less predictable"""
+        # 40% chance to skip a check (increased from 20%)
+        if random.random() < 0.4:
+            print("🎲 Randomly skipping this check to avoid detection")
+            return True
+        return False
         
     def init_instagram_client(self):
-        """Initialize Instagram client"""
+        """Initialize Instagram client with stealth settings"""
         try:
-            print("🔧 Initializing Instagram client...")
+            print("🔧 Initializing stealth Instagram client...")
             self.instagram_client = Client()
+            
+            # Stealth settings
+            self.instagram_client.delay_range = [3, 7]  # Longer delays between requests
             
             if self.ig_sessionid:
                 try:
@@ -70,8 +81,11 @@ class InstagramStoryBot:
                     decoded_sessionid = urllib.parse.unquote(self.ig_sessionid)
                     self.instagram_client.login_by_sessionid(decoded_sessionid)
                     
+                    # Add delay after login
+                    time.sleep(self.get_stealth_delay())
+                    
                     user_info = self.instagram_client.account_info()
-                    print(f"✅ Session login successful! Logged in as: {user_info.username}")
+                    print(f"✅ Stealth login successful! Logged in as: {user_info.username}")
                     self.is_working = True
                     return True
                     
@@ -88,6 +102,19 @@ class InstagramStoryBot:
             print(f"❌ Failed to initialize Instagram client: {e}")
             self.is_working = False
             return False
+    
+    def instagram_action_delay(self):
+        """Ensure minimum delay between Instagram actions"""
+        current_time = time.time()
+        time_since_last = current_time - self.last_instagram_action
+        min_delay = 30  # Minimum 30 seconds between Instagram actions (increased from 15)
+        
+        if time_since_last < min_delay:
+            sleep_time = min_delay - time_since_last + random.uniform(0, 15)  # Added more random delay
+            print(f"⏳ Waiting {sleep_time:.1f}s between Instagram actions...")
+            time.sleep(sleep_time)
+        
+        self.last_instagram_action = time.time()
     
     def load_followers_data(self):
         """Load previous followers data"""
@@ -175,27 +202,31 @@ class InstagramStoryBot:
             print(f"❌ Error sending video: {e}")
             return False
     
-    def get_user_stories(self):
-        """Get Instagram stories"""
+    def get_user_stories_stealth(self):
+        """Get Instagram stories with stealth approach"""
         if not self.instagram_client or not self.is_working:
             print("❌ Instagram client not working")
             return []
         
         try:
+            # Add delay before Instagram action
+            self.instagram_action_delay()
+            
             print(f"📱 Getting stories for @{self.instagram_username}...")
             
-            # Get user info
+            # Get user info with delay
             user_info = self.instagram_client.user_info_by_username(self.instagram_username)
             user_id = user_info.pk
-            print(f"✅ Found user: {user_info.full_name} (@{user_info.username})")
+            print(f"✅ Found user: {user_info.full_name}")
             
-            time.sleep(2)
+            # Random delay between actions
+            time.sleep(self.get_stealth_delay())
             
             try:
                 user_stories = self.instagram_client.user_stories(user_id)
                 
                 if not user_stories:
-                    print(f"ℹ️ No active stories found for @{self.instagram_username}")
+                    print(f"ℹ️ No active stories found")
                     return []
                 
                 stories = []
@@ -207,12 +238,12 @@ class InstagramStoryBot:
                         
                         # Skip if already sent
                         if story_id in self.sent_stories:
-                            print(f"⏭️ Story {story.pk} already sent, skipping")
+                            print(f"⏭️ Story already sent, skipping")
                             continue
                         
-                        print(f"🔍 Processing story {i+1}/{len(user_stories)}: {story.pk}")
+                        print(f"🔍 Processing story {i+1}/{len(user_stories)}")
                         
-                        # Get media URL
+                        # Get media URL with stealth delays
                         media_url = None
                         media_type = 'photo'
                         
@@ -220,32 +251,17 @@ class InstagramStoryBot:
                             if hasattr(story, 'video_url') and getattr(story, 'video_url', None):
                                 media_url = getattr(story, 'video_url')
                                 media_type = 'video'
-                                print(f"✅ Found video URL for story {story.pk}")
                             elif hasattr(story, 'thumbnail_url') and getattr(story, 'thumbnail_url', None):
                                 media_url = getattr(story, 'thumbnail_url')
                                 media_type = 'photo'
-                                print(f"✅ Found thumbnail URL for story {story.pk}")
                             elif hasattr(story, 'url') and getattr(story, 'url', None):
                                 media_url = getattr(story, 'url')
                                 media_type = 'photo'
-                                print(f"✅ Found image URL for story {story.pk}")
                         except Exception as url_error:
-                            print(f"⚠️ Could not get direct URL for story {story.pk}: {url_error}")
+                            print(f"⚠️ Could not get direct URL: {url_error}")
                         
-                        # Try alternative method
-                        if not media_url:
-                            try:
-                                story_info = self.instagram_client.story_info(story.pk)
-                                if story_info and hasattr(story_info, 'video_url') and getattr(story_info, 'video_url', None):
-                                    media_url = getattr(story_info, 'video_url')
-                                    media_type = 'video'
-                                    print(f"✅ Found video URL via story_info for {story.pk}")
-                                elif story_info and hasattr(story_info, 'thumbnail_url') and getattr(story_info, 'thumbnail_url', None):
-                                    media_url = getattr(story_info, 'thumbnail_url')
-                                    media_type = 'photo'
-                                    print(f"✅ Found thumbnail URL via story_info for {story.pk}")
-                            except Exception as info_error:
-                                print(f"⚠️ Could not get story_info for {story.pk}: {info_error}")
+                        # Random delay between story processing
+                        time.sleep(random.uniform(5, 12))  # Increased from 2-5
                         
                         if media_url:
                             story_data = {
@@ -257,12 +273,10 @@ class InstagramStoryBot:
                             }
                             
                             stories.append(story_data)
-                            print(f"✅ Added story {story.pk} to queue")
-                        else:
-                            print(f"❌ Could not get URL for story {story.pk}")
-                            
+                            print(f"✅ Added story to queue")
+                        
                     except Exception as story_error:
-                        print(f"❌ Error processing story {story.pk}: {story_error}")
+                        print(f"❌ Error processing story: {story_error}")
                         continue
                 
                 print(f"📦 Returning {len(stories)} stories")
@@ -273,16 +287,20 @@ class InstagramStoryBot:
                 return []
                 
         except Exception as e:
-            print(f"❌ Error in get_user_stories: {e}")
+            print(f"❌ Error in get_user_stories_stealth: {e}")
             return []
     
     def process_stories(self):
-        """Process and send stories"""
+        """Process and send stories with stealth delays"""
         if not self.is_working:
             print("⚠️ Instagram client not working, skipping stories")
             return
         
-        stories = self.get_user_stories()
+        # Random chance to skip
+        if self.should_skip_this_check():
+            return
+        
+        stories = self.get_user_stories_stealth()
         
         if not stories:
             print("ℹ️ No new stories to process")
@@ -298,7 +316,7 @@ class InstagramStoryBot:
                 else:
                     story_time = story['timestamp'].astimezone(ISRAEL_TZ)
                 
-                # Clean caption - just username and time
+                # Clean caption
                 caption = f"@{self.instagram_username} • {story_time.strftime('%d/%m %H:%M')}"
                 
                 success = False
@@ -308,38 +326,45 @@ class InstagramStoryBot:
                     success = self.send_telegram_photo(story['url'], caption)
                 
                 if success:
-                    print(f"✅ Sent story: {story['id']} ({story['type']})")
+                    print(f"✅ Sent story: {story['type']}")
                     self.sent_stories.append(story['id'])
                     
                     # Keep only last 50 sent stories
                     if len(self.sent_stories) > 50:
                         self.sent_stories = self.sent_stories[-50:]
                 else:
-                    print(f"❌ Failed to send story: {story['id']}")
+                    print(f"❌ Failed to send story")
                 
-                time.sleep(5)
+                # Random delay between sends
+                time.sleep(random.uniform(15, 30))  # Increased from 8-15
                 
             except Exception as e:
                 print(f"❌ Error processing story: {e}")
     
-    def check_followers_changes(self):
-        """Check for followers changes"""
+    def check_followers_changes_stealth(self):
+        """Check for followers changes with stealth approach - LESS FREQUENT"""
         if not self.instagram_client or not self.is_working:
             print("⚠️ Instagram client not working, skipping followers check")
             return
         
+        # Only check followers every 4th time (reduce API calls even more)
+        if random.random() < 0.75:  # 75% chance to skip followers check (increased from 66%)
+            print("🎲 Skipping followers check this time")
+            return
+        
         try:
-            print(f"👥 Checking followers changes for @{self.instagram_username}...")
+            # Add delay before Instagram action
+            self.instagram_action_delay()
+            
+            print(f"👥 Checking followers changes...")
             
             # Get user info
             user_info = self.instagram_client.user_info_by_username(self.instagram_username)
-            user_id = user_info.pk
-            
             current_followers_count = user_info.follower_count
             current_following_count = user_info.following_count
             
             # Check if this is first time running
-            is_first_run = not self.last_followers.get('initialized', False) or not self.last_following.get('initialized', False)
+            is_first_run = not self.last_followers.get('initialized', False)
             
             if is_first_run:
                 print("🆕 First run - initializing followers data")
@@ -359,30 +384,22 @@ class InstagramStoryBot:
                 
                 self.save_followers_data(self.last_followers)
                 self.save_following_data(self.last_following)
-                
-                print(f"✅ Initialized: {current_followers_count} followers, {current_following_count} following")
                 return
             
             # Get previous counts
             last_followers_count = self.last_followers.get('count', 0)
             last_following_count = self.last_following.get('count', 0)
             
-            print(f"📊 Followers: {last_followers_count} -> {current_followers_count}")
-            print(f"📊 Following: {last_following_count} -> {current_following_count}")
-            
             # Check for changes
             followers_changed = current_followers_count != last_followers_count
             following_changed = current_following_count != last_following_count
             
             if not followers_changed and not following_changed:
-                print(f"ℹ️ No changes detected")
                 return
             
             messages = []
             
             if followers_changed:
-                print(f"📈 Followers count changed: {last_followers_count} -> {current_followers_count}")
-                
                 if current_followers_count > last_followers_count:
                     new_count = current_followers_count - last_followers_count
                     messages.append(f"➕ {new_count} new followers")
@@ -394,8 +411,6 @@ class InstagramStoryBot:
                 self.save_followers_data(self.last_followers)
             
             if following_changed:
-                print(f"📈 Following count changed: {last_following_count} -> {current_following_count}")
-                
                 if current_following_count > last_following_count:
                     new_count = current_following_count - last_following_count
                     messages.append(f"👤 Following {new_count} new accounts")
@@ -406,47 +421,42 @@ class InstagramStoryBot:
                 self.last_following['count'] = current_following_count
                 self.save_following_data(self.last_following)
             
-            # Send clean message
+            # Send message
             if messages:
                 summary_time = datetime.now(ISRAEL_TZ).strftime('%d/%m %H:%M')
                 summary_msg = f"@{self.instagram_username} • {summary_time}\n" + "\n".join(messages)
                 self.send_telegram_message(summary_msg)
-                print(f"📱 Sent followers update: {len(messages)} changes")
-            
-            time.sleep(3)
+                print(f"📱 Sent followers update")
             
         except Exception as e:
             print(f"❌ Error checking followers changes: {e}")
     
     def start_monitoring(self):
-        """Start monitoring"""
-        print(f"🚀 Starting Instagram Story Monitor...")
+        """Start stealth monitoring"""
+        print(f"🥷 Starting STEALTH Instagram Monitor...")
         print(f"👤 Monitoring: @{self.instagram_username}")
         print(f"📱 Sending to Telegram chat: {self.chat_id}")
-        print(f"⏱️ Smart timing: 30-45min (day) | 60min (3-9 AM)")
+        print(f"⏱️ Ultra stealth timing: 2-4h (day) | 4-8h (night)")
+        print(f"🎲 40% random skips, 75% follower skips enabled")
         
         if self.is_working:
-            startup_msg = f"Instagram Bot • @{self.instagram_username}"
+            startup_msg = f"🥷 Ultra Stealth Bot • @{self.instagram_username}"
         else:
-            startup_msg = f"Instagram Bot • Not connected"
+            startup_msg = f"🥷 Ultra Stealth Bot • Not connected"
         
         self.send_telegram_message(startup_msg)
         
-        # Check immediately
-        if self.is_working:
-            print("📸 Checking for stories...")
-            self.process_stories()
-            
-            print("👥 Checking for followers changes...")
-            self.check_followers_changes()
+        # Don't check immediately - wait for first interval
+        print("⏳ Starting with delay to avoid detection...")
         
-        # Main loop
+        # Main loop with stealth timing
         while True:
             try:
                 if not self.is_working:
                     print("🛑 Instagram client not working, stopping...")
                     break
                 
+                # Get next interval (much longer now)
                 next_interval = self.get_next_check_interval()
                 
                 current_time = datetime.now(ISRAEL_TZ)
@@ -455,20 +465,28 @@ class InstagramStoryBot:
                     tz=ISRAEL_TZ
                 )
                 
-                print(f"⏳ Waiting until {next_check_time.strftime('%H:%M:%S')}...")
+                print(f"⏳ Next check: {next_check_time.strftime('%d/%m %H:%M')}")
                 time.sleep(next_interval)
                 
-                print(f"🔄 Running checks at {datetime.now(ISRAEL_TZ).strftime('%H:%M:%S')}")
+                print(f"🔄 Running stealth checks at {datetime.now(ISRAEL_TZ).strftime('%H:%M:%S')}")
+                
+                # Process stories (with random skips)
                 self.process_stories()
-                self.check_followers_changes()
+                
+                # Random delay between story and follower checks
+                time.sleep(random.uniform(60, 180))  # 1-3 minutes (increased from 30-90 seconds)
+                
+                # Check followers (less frequently)
+                self.check_followers_changes_stealth()
                 
             except KeyboardInterrupt:
-                print("\n🛑 Bot stopped by user")
+                print("\n🛑 Stealth bot stopped by user")
                 break
             except Exception as e:
                 print(f"❌ Unexpected error: {e}")
-                print("⏳ Error occurred, retrying in 5 minutes...")
-                time.sleep(300)
+                # Longer retry delay
+                print("⏳ Error occurred, retrying in 1 hour...")
+                time.sleep(3600)  # 1 hour (increased from 30 minutes)
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -480,7 +498,7 @@ def main():
         print("❌ Missing required environment variables!")
         return
     
-    print(f"🚀 Starting bot...")
+    print(f"🥷 Starting stealth bot...")
     print(f"👤 Target: @{INSTAGRAM_USERNAME}")
     
     if IG_SESSIONID:
@@ -489,7 +507,7 @@ def main():
         print("❌ No Session ID provided")
         return
     
-    bot = InstagramStoryBot(BOT_TOKEN, CHAT_ID, INSTAGRAM_USERNAME, IG_SESSIONID)
+    bot = StealthInstagramBot(BOT_TOKEN, CHAT_ID, INSTAGRAM_USERNAME, IG_SESSIONID)
     bot.start_monitoring()
 
 if __name__ == "__main__":
